@@ -2,6 +2,7 @@
 name = "jianmo"
 version = "0.2.0"
 description = "Jianmo Markdown editor"
+license = "Apache-2.0"
 edition = "2021"
 
 [lib]
