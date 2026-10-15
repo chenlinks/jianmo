@@ -1,0 +1,35 @@
+.markdown-body { font-size: calc(var(--type-article-size) * var(--reading-scale, 1)); line-height: calc(var(--type-article-line) * var(--reading-scale, 1)); font-weight: var(--weight-regular); overflow-wrap: anywhere; }
+.markdown-body > :first-child { margin-top: 0; }
+.markdown-body h1 { font-size: calc(var(--type-article-title-size) * var(--reading-scale, 1)); line-height: calc(var(--type-article-title-line) * var(--reading-scale, 1)); font-weight: var(--weight-semibold); letter-spacing: -.025em; margin: 0 0 24px; }
+.markdown-body h2 { font-size: calc(var(--type-article-h2-size) * var(--reading-scale, 1)); line-height: calc(var(--type-article-h2-line) * var(--reading-scale, 1)); font-weight: var(--weight-semibold); margin: 40px 0 16px; }
+.markdown-body h3, .markdown-body h4, .markdown-body h5, .markdown-body h6 { font-size: calc(var(--type-article-h3-size) * var(--reading-scale, 1)); line-height: calc(var(--type-article-h3-line) * var(--reading-scale, 1)); font-weight: var(--weight-semibold); margin: 24px 0 12px; }
+.markdown-body p, .markdown-body ul, .markdown-body ol { margin: 0 0 20px; }
+.markdown-body li { margin: 4px 0; }
+.markdown-body li > p { margin: 0; }
+.markdown-body ul, .markdown-body ol { padding-left: 24px; }
+.markdown-body li > ul, .markdown-body li > ol { margin-bottom: 0; }
+.markdown-body strong, .markdown-body b { font-weight: var(--weight-semibold); }
+.markdown-body blockquote { border-left: 3px solid var(--accent); margin: 24px 0; padding: 8px 20px; background: var(--source); color: var(--secondary); font-size: calc(var(--type-quote-size) * var(--reading-scale, 1)); line-height: calc(var(--type-quote-line) * var(--reading-scale, 1)); }
+.markdown-body blockquote > :last-child { margin-bottom: 0; }
+.markdown-body a { color: var(--accent); text-underline-offset: 3px; }
+.markdown-body pre { background: var(--code); padding: 20px; border: 1px solid var(--line); border-radius: var(--radius-panel); overflow-x: auto; }
+.markdown-body code { font-family: var(--font-mono); font-size: var(--type-code-size); line-height: var(--type-code-line); background: var(--code); padding: 2px 5px; border-radius: var(--radius-small); }
+.markdown-body pre code { padding: 0; }
+.markdown-body table { border-collapse: collapse; display: block; max-width: 100%; overflow-x: auto; margin: 24px 0; font-size: var(--type-table-size); line-height: var(--type-table-line); }
+.markdown-body th, .markdown-body td { padding: var(--table-padding-y) var(--table-padding-x); border: 0; border-bottom: 1px solid var(--line); text-align: left; height: var(--table-row-height); vertical-align: middle; }
+.markdown-body table[data-table-style=grid] th, .markdown-body table[data-table-style=grid] td { border: 1px solid var(--line); }
+.markdown-body table[data-table-style=striped] tbody tr:nth-child(even) { background: var(--source); }
+.markdown-body td > p:last-child, .markdown-body th > p:last-child { margin-bottom: 0; }
+.markdown-body img[data-block-align] { display: block; }
+.markdown-body table[data-block-align] { width: max-content; }
+.markdown-body [data-block-align=left] { margin-left: 0; margin-right: auto; }
+.markdown-body [data-block-align=center] { margin-left: auto; margin-right: auto; }
+.markdown-body [data-block-align=right] { margin-left: auto; margin-right: 0; }
+.markdown-body th { background: var(--source); font-weight: var(--weight-semibold); }
+.markdown-body img { max-width: 100%; border-radius: var(--radius-control); }
+.markdown-body img:not([height]) { height: auto; }
+.markdown-body input[type=checkbox] { width: var(--checkbox-size); height: var(--checkbox-size); accent-color: var(--accent); margin-right: 8px; }
+.markdown-body hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+.markdown-body .math-node { cursor: text; }.markdown-body div.math-node { margin: 24px 0; padding: 12px; overflow-x: auto; text-align: center; }.markdown-body .math-node math { font-size: inherit; }.live-editor .math-node:hover, .live-editor img:hover { outline: 1px solid var(--accent); outline-offset: 4px; }.live-editor td:focus-within, .live-editor th:focus-within { background: var(--source); }
+@media(max-width:760px) { .markdown-body h1 { font-size: calc(var(--type-mobile-article-title-size) * var(--reading-scale, 1)); line-height: calc(var(--type-mobile-article-title-line) * var(--reading-scale, 1)); } }
+@media print { .markdown-body pre, .markdown-body tr, .markdown-body img { break-inside: avoid; } .markdown-body h1, .markdown-body h2, .markdown-body h3 { break-after: avoid; } }

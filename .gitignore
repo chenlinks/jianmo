@@ -1,0 +1,15 @@
+node_modules/
+dist/
+release/
+src-tauri/target/
+src-tauri/gen/
+*.log
+.DS_Store
+design/*
+!design/design-tokens.json
+!design/design-tokens.css
+!design/build-design-system.py
+docs
+.vs
+.idea
+/jianmo-app-preview.html

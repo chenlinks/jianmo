@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Local editor window. File access is restricted to native dialog selections in Rust.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

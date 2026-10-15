@@ -1,0 +1,12 @@
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+const root = new URL('../', import.meta.url);
+const read = name => readFileSync(new URL(name, root), 'utf8');
+const css = read('src/styles/tokens.css') + '\n' + read('src/styles/article.css') + '\n' + read('src/styles/app.css').replace("@import './article.css';", '');
+const javascript = read('dist/app.js');
+const icon = 'data:image/svg+xml,' + encodeURIComponent(read('public/favicon.svg'));
+const head = '<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>笺墨 Jianmo</title><link rel="icon" href="' + icon + '">';
+mkdirSync(new URL('dist/', root), { recursive: true });
+writeFileSync(new URL('dist/styles.css', root), css);
+writeFileSync(new URL('dist/index.html', root), head + '<link rel="stylesheet" href="styles.css"></head><body><div id="root"></div><script src="app.js"></script></body></html>');
+writeFileSync(new URL('jianmo-app-preview.html', root), head + '<style>' + css + '</style></head><body><div id="root"></div><script>' + javascript.replace(/<\/script/gi, '<\\/script') + '</script></body></html>');
+console.log('Portable React app written to dist/ and jianmo-app-preview.html');

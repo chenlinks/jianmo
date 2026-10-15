@@ -1,0 +1,3 @@
+export default function Logo({ className = '' }: { className?: string }) {
+  return <svg className={`jianmo-logo ${className}`} viewBox="0 0 40 40" fill="none" aria-hidden="true"><rect width="40" height="40" rx="11" fill="currentColor" /><path d="M12 8h11l6 6v15a3 3 0 0 1-3 3H12a3 3 0 0 1-3-3V11a3 3 0 0 1 3-3Z" fill="var(--bg,#fff)" fillOpacity=".96"/><path d="M23 8v6h6" fill="currentColor" fillOpacity=".22"/><path d="m16 25 2-8 7-2-2 7-7 3Z" fill="currentColor"/><path d="m16 25 5-5" stroke="var(--bg,#fff)" strokeWidth="1.3" strokeLinecap="round"/><circle cx="21" cy="20" r="1.2" fill="var(--bg,#fff)"/><path d="M15 28h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>;
+}
