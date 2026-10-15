@@ -6,6 +6,7 @@ src-tauri/gen/
 *.log
 .DS_Store
 /design/
+AGENTS.md
 docs
 .vs
 .idea
