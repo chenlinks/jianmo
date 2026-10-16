@@ -73,7 +73,19 @@ kbd { font-family: var(--font-ui); color: var(--muted); font-size: var(--type-ca
 .source-panel textarea { flex: 1; min-height: 0; width: 100%; resize: none; border: 0; background: transparent; padding: 20px 32px; font-family: var(--font-mono); font-size: var(--type-source-size); line-height: var(--type-source-line); font-weight: var(--weight-regular); tab-size: 2; }
 .source-panel textarea:focus-visible { outline-offset: -2px; }
 .mode-split .preview-panel { padding: 20px; }.mode-split .paper { padding: var(--layout-split-paper-padding); }
-.inspector { width: var(--layout-inspector); padding: 28px 16px; background: var(--bg); border-left: 1px solid var(--line); flex-shrink: 0; overflow-y: auto; }
+.inspector { width: var(--layout-inspector); padding: 28px 16px; background: var(--bg); border-left: 1px solid var(--line); flex-shrink: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.inspector > .section-label, .inspector > .document-info { flex-shrink: 0; }
+.outline-browser { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+.outline-browser::before, .outline-browser::after { content: ''; position: absolute; left: 0; right: 0; height: 16px; z-index: 1; pointer-events: none; opacity: 0; }
+.outline-browser::before { top: 0; background: linear-gradient(to bottom, var(--bg), transparent); }
+.outline-browser::after { bottom: 0; background: linear-gradient(to top, var(--bg), transparent); }
+.outline-browser.has-content-above::before, .outline-browser.has-content-below::after { opacity: 1; }
+.outline-browser:focus-within::before, .outline-browser:focus-within::after { opacity: 0; }
+.outline-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: none; padding: 2px; }
+.outline-scroll::-webkit-scrollbar { display: none; }
+.outline-scroll:focus-visible { outline-offset: -2px; border-radius: var(--radius-control); }
+.outline-dialog[open] { display: flex; flex-direction: column; height: min(640px, calc(100dvh - 48px)); overflow: hidden; }
+.outline-dialog > .dialog-heading { flex-shrink: 0; }
 .outline-list { display: flex; flex-direction: column; gap: 4px; }
 .outline-list button { text-align: left; justify-content: flex-start; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--secondary); font-weight: var(--weight-regular); }
 .outline-list .level-1 { color: var(--text); font-weight: var(--weight-medium); }.outline-list .level-2 { padding-left: 20px; }.outline-list .level-3, .outline-list .level-4, .outline-list .level-5, .outline-list .level-6 { padding-left: 28px; }
