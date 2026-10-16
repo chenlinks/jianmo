@@ -247,5 +247,43 @@ test('actual React UI: editing, menus, directory creation and persistent library
     await act(async () => { item.textContent = ''; const range = win.document.createRange(); range.selectNodeContents(item); range.collapse(true); win.getSelection()!.removeAllRanges(); win.getSelection()!.addRange(range); item.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
     assert.equal(richList.querySelectorAll('li').length, 1); assert.ok(richList.querySelector('p'));
 
+    // File drops must bypass the contenteditable drop handler without replacing its draft.
+    const beforeDrop = state().documents.map(doc => ({ id: doc.id, content: doc.content }));
+    const drag = async (type: string, target: Element, files: File[] = [], types = ['Files']) => {
+      const event = new win.Event(type, { bubbles: true, cancelable: true });
+      const data = { types, files, dropEffect: '' };
+      Object.defineProperty(event, 'dataTransfer', { value: data });
+      await act(async () => { target.dispatchEvent(event); });
+      return { event, data };
+    };
+    const shell = win.document.querySelector('.app-shell')!;
+    await drag('dragenter', shell);
+    assert.match(win.document.querySelector('.file-drop-overlay')!.textContent!, /松开即可阅读/);
+    await drag('dragenter', richList); await drag('dragleave', richList);
+    assert.ok(win.document.querySelector('.file-drop-overlay'), 'crossing child elements keeps drop feedback');
+    const over = await drag('dragover', richList);
+    assert.equal(over.event.defaultPrevented, true); assert.equal(over.data.dropEffect, 'copy');
+    await drag('dragleave', shell); assert.equal(win.document.querySelector('.file-drop-overlay'), null);
+    const textDrag = await drag('dragover', shell, [], ['text/plain']);
+    assert.equal(textDrag.event.defaultPrevented, false);
+    await click('视图'); await click('源码模式');
+    const dropped = await drag('drop', win.document.querySelector('textarea')!, [new File(['# 拖入阅读'], '拖入.MD'), new File(['bad'], 'bad.pdf'), new File(['# 第二篇'], '第二篇.markdown'), new File(['纯文本'], '文本.txt')]);
+    assert.equal(dropped.event.defaultPrevented, true);
+    assert.equal(state().documents.length, beforeDrop.length + 3);
+    for (const doc of beforeDrop) assert.equal(state().documents.find(item => item.id === doc.id)!.content, doc.content);
+    assert.ok(win.document.querySelector('.live-editor')); assert.equal(win.document.querySelector('textarea'), null);
+    assert.match(win.document.querySelector('.live-editor')!.textContent!, /纯文本/);
+    assert.match(win.document.body.textContent!, /bad.pdf/);
+    assert.equal(win.document.querySelector('.file-drop-overlay'), null);
+    const count = state().documents.length;
+    await drag('drop', win.document.querySelector('.live-editor')!, [new File([new Uint8Array([255])], 'broken.md')]);
+    assert.equal(state().documents.length, count, 'invalid UTF-8 does not create a document');
+    await drag('drop', shell); assert.match(win.document.body.textContent!, /不支持文件夹/);
+    while (win.document.querySelector('.tabs .icon-button')) await act(async () => (win.document.querySelector('.tabs .icon-button') as HTMLButtonElement).click());
+    await drag('drop', win.document.querySelector('.welcome-page')!, [new File(['# 欢迎页拖入'], '欢迎.md')]);
+    assert.equal(win.document.querySelector('.markdown-body h1')?.textContent, '欢迎页拖入');
+    await act(async () => root.unmount()); root = createRoot(win.document.getElementById('root')!); await act(async () => root.render(React.createElement(App)));
+    assert.equal(win.document.querySelector('.markdown-body h1')?.textContent, '欢迎页拖入', 'dropped documents survive draft recovery');
+
   } finally { await act(async () => root.unmount()); dom.window.close(); }
 });

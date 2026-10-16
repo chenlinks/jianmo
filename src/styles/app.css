@@ -12,6 +12,10 @@ svg { flex-shrink: 0; }
 input:not([type=range]), select { height: var(--input-height); border: 1px solid var(--line); background: var(--bg); border-radius: var(--radius-control); padding: 0 var(--input-padding-x); min-width: 0; }
 input::placeholder { color: var(--muted); } input[type=range] { width: 100%; accent-color: var(--accent); min-height: 32px; }
 input[hidden] { display: none; }
+.file-drop-overlay { position: fixed; inset: 12px; z-index: 1000; display: grid; place-items: center; pointer-events: none; border: 2px dashed var(--accent); border-radius: var(--radius-control); background: color-mix(in srgb, var(--bg) 90%, transparent); }
+.file-drop-overlay > div { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 24px; text-align: center; color: var(--text); }
+.file-drop-overlay strong { font-size: var(--type-page-title-size); line-height: var(--type-page-title-line); font-weight: var(--weight-semibold); }
+.file-drop-overlay span { font-size: var(--type-ui-size); line-height: var(--type-ui-line); color: var(--muted); }
 .primary { background: var(--accent); color: var(--accent-ink); } .primary:hover { background: var(--accent-hover); } .primary:active { background: var(--accent-pressed); }
 .secondary { border-color: var(--line); background: var(--bg); }
 .icon-button { width: var(--icon-button-height); min-height: var(--icon-button-height); padding: 0; flex-shrink: 0; }

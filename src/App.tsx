@@ -47,6 +47,7 @@ export default function App() {
   const [tabs, setTabs] = useState(boot.state.openTabs ?? [boot.state.activeId]); const [focus, setFocus] = useState(false);
   const [notice, setNotice] = useState(''); const [cacheError, setCacheError] = useState(boot.error);
   const [busy, setBusy] = useState(false); const operation = useRef(false);
+  const [draggingFiles, setDraggingFiles] = useState(false); const dragDepth = useRef(0);
   const [formName, setFormName] = useState(''); const [template, setTemplate] = useState('blank');
   const [folderError, setFolderError] = useState('');
   const [renameTarget, setRenameTarget] = useState<{ docId: string } | { entry: NotebookEntry; directory: string[]; location?: string } | null>(null);
@@ -275,6 +276,22 @@ export default function App() {
       setNotice('文件已打开');
     });
   }
+  function importFiles(files: File[], read = false) {
+    if (operation.current) { setNotice('正在处理文件，请稍后再拖入'); return; }
+    void run(async () => {
+      let imported = 0; const errors: string[] = [];
+      for (const file of files) {
+        try {
+          const data = await readBrowserFile(file);
+          add({ ...newDocument(data.name, data.content), savedContent: data.content }); imported++;
+        } catch (error) { errors.push(`${file.name}：${error instanceof Error ? error.message : String(error)}`); }
+      }
+      if (imported && read) { setView('read'); setMedia(null); setContextMenu(null); }
+      setNotice([imported ? `已导入 ${imported} 个文件` : '', ...errors].filter(Boolean).join('；'));
+    });
+  }
+  function isFileDrag(event: React.DragEvent) { return Array.from(event.dataTransfer.types).includes('Files'); }
+  function clearFileDrag() { dragDepth.current = 0; setDraggingFiles(false); }
   function openDirectory(useDefault = false) {
     void run(async () => {
       const root = useDefault ? await resetNotebookLocation() : await pickNotebook(); if (!root) return;
@@ -457,7 +474,18 @@ export default function App() {
     <div className="document-list" onContextMenu={e => context(e, 'directory')}>{folders.map(entry => <button className="notebook-entry directory-entry" key={entry.handle} disabled={busy} aria-label={`打开目录 ${entry.name}`} onClick={() => void run(() => enterDirectory(entry))} onContextMenu={e => entryContext(e, entry)} onKeyDown={e => { if (e.key === 'F2') { e.preventDefault(); openEntryRename(entry); } }}><Icon name="folder" /><span>{entry.name}</span><span aria-hidden="true">›</span></button>)}{visible.map(d => <button className="document-row" key={d.id} aria-current={hasDocument && d.id === current.id ? 'page' : undefined} onContextMenu={e => { activate(d.id); context(e, 'document'); }} onKeyDown={e => { if (e.key === 'F2') { e.preventDefault(); openRename(d); } }} onClick={() => activate(d.id)}><Icon name="file" /><span className="document-copy"><span>{d.name.replace(/\.(md|markdown|txt)$/i, '')}</span><small>{d.content.split('\n').find(l => l.trim() && !/^#/.test(l))?.replace(/[*_`>]/g, '') || '写下第一个想法'}</small></span>{d.starred && <span className="star-dot" aria-label="已收藏">•</span>}</button>)}{unopened.map(entry => <button className="notebook-entry" key={entry.handle} disabled={busy} title={entry.name} onContextMenu={e => entryContext(e, entry)} onKeyDown={e => { if (e.key === 'F2') { e.preventDefault(); openEntryRename(entry); } }} onClick={() => void run(() => openNote(entry))}><Icon name="file" /><span>{entry.name}</span></button>)}{!visible.length && !unopened.length && !folders.length && <div className="empty-library">{query || starredOnly ? <><p>没有符合筛选的笔记</p><button onClick={() => { setQuery(''); setStarredOnly(false); }}>清除筛选</button></> : <><p>当前目录为空</p><p className="hint">在此处右键新建笔记或目录</p></>}</div>}</div>
     <div className="library-bottom"><button className="preferences-entry" aria-label="偏好设置" onClick={() => setDialog('settings')}><Icon name="settings" /><span>偏好设置</span></button></div>
   </>;
-  return <div className={`app-shell ${focus ? 'is-focused' : ''} page-${state.pageWidth ?? 'normal'}`} style={{ '--reading-scale': state.fontSize / 17 } as CSSProperties}>
+  return <div className={`app-shell ${focus ? 'is-focused' : ''} page-${state.pageWidth ?? 'normal'}`} style={{ '--reading-scale': state.fontSize / 17 } as CSSProperties}
+    onDragEnterCapture={e => { if (isFileDrag(e)) { e.preventDefault(); dragDepth.current++; setDraggingFiles(true); } }}
+    onDragOverCapture={e => { if (isFileDrag(e)) { e.preventDefault(); e.dataTransfer.dropEffect = busy ? 'none' : 'copy'; } }}
+    onDragLeaveCapture={e => { if (isFileDrag(e) && --dragDepth.current <= 0) clearFileDrag(); }}
+    onDragEndCapture={clearFileDrag}
+    onDropCapture={e => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault(); e.stopPropagation(); clearFileDrag();
+      const files = Array.from(e.dataTransfer.files);
+      if (files.length) importFiles(files, true);
+      else setNotice('请拖入 .md、.markdown 或 .txt 文件，不支持文件夹');
+    }}>
     <AppMenu groups={menuGroups.map(group => ['编辑', '段落', '格式'].includes(group.label) && !hasDocument ? { ...group, items: group.items.map(item => ({ ...item, disabled: true })) } : group)} />
     <div className="app-body">
     <a className="skip-link" href="#document-content">跳到文稿</a>
@@ -480,7 +508,8 @@ export default function App() {
       <nav className="mobile-nav" aria-label="快捷操作"><button onClick={() => setDialog('library')}><Icon name="folder" />文档</button><button onClick={() => setDialog('outline')}><Icon name="outline" />大纲</button><button onClick={() => setDialog('settings')}><Icon name="settings" />设置</button></nav>
     </main>
     </div>
-    <input ref={importer} type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" hidden aria-label="导入 Markdown 文件" onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void run(async () => { const data = await readBrowserFile(file); add({ ...newDocument(data.name, data.content), savedContent: data.content }); setNotice('文件已导入文档库'); }); }} />
+    {draggingFiles && <div className="file-drop-overlay" role="status"><div><Icon name="file" /><strong>{busy ? '正在处理文件，请稍候' : '松开即可阅读'}</strong><span>支持 .md、.markdown、.txt，可同时拖入多个文件</span></div></div>}
+    <input ref={importer} type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" hidden aria-label="导入 Markdown 文件" onChange={e => { const files = Array.from(e.target.files ?? []); e.target.value = ''; if (files.length) importFiles(files); }} />
     {contextMenu && <ContextMenu state={contextMenu} items={contextMenu.type === 'entry' && contextEntry ? [{ label: contextEntry.kind === 'directory' ? '打开目录' : '打开笔记', disabled: busy, action: () => void run(() => contextEntry.kind === 'directory' ? enterDirectory(contextEntry) : openNote(contextEntry)) }, { label: '重命名', shortcut: 'F2', disabled: busy, action: () => openEntryRename(contextEntry) }, { label: contextEntry.kind === 'directory' ? '删除目录' : '删除笔记', disabled: busy, action: () => openDelete({ entry: contextEntry }) }] : contextMenu.type === 'directory' ? [{ label: '新建目录', action: openNewFolder, disabled: busy }, { label: '新建笔记', action: openNew, disabled: busy }, { label: '刷新目录', separator: true, disabled: busy || !notebook.trail.length, action: () => void run(async () => notebook.setEntries(await listNotebook(notebook.trail.at(-1)!.handle))) }] : contextMenu.type === 'document' ? documentItems : [...editItems, ...formatItems.map((item, i) => ({ ...item, separator: i === 0 })), ...mediaItems]} close={() => setContextMenu(null)} />}
     {notice && <div className="toast" role="status"><span>{notice}</span><button className="icon-button" aria-label="关闭提示" onClick={() => setNotice('')}><Icon name="close" /></button></div>}
     {media && <InsertMedia initial={media} imageContext={imageContext} onImage={storeImage} onClose={() => setMedia(null)} onInsert={insertMedia} />}
