@@ -16,8 +16,10 @@ test('actual React UI: editing, menus, directory creation and persistent library
   Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: () => 'blob:http://localhost/test-image' });
   Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: () => {} });
   const disk = new Map<string, string>(); const directories = new Set<string>(); let creations = 0;
+  const revealed: string[] = [];
   Object.defineProperty(win, '__TAURI__', { value: { core: { invoke: async (command: string, args: Record<string, string>) => {
     if (command === 'store_notebook_image') return '.assets/image-test.png';
+    if (command === 'reveal_document') { revealed.push(args.handle); return; }
     if (command === 'read_notebook_image') return [137, 80, 78, 71, 13, 10, 26, 10];
     if (command === 'rename_notebook_entry' || command === 'rename_document') {
       const source = resolve(args.handle); const folder = directories.has(source);
@@ -56,6 +58,8 @@ test('actual React UI: editing, menus, directory creation and persistent library
   const state = () => parseWorkspace(win.localStorage.getItem(STORAGE_KEY)!);
   try {
     await act(async () => root.render(React.createElement(App)));
+    await click('文件'); assert.equal(button('打开文件所在位置').disabled, true, 'an unsaved draft has no file location');
+    await act(async () => win.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     assert.equal(win.document.querySelector('.markdown-body h1')?.textContent, '让想法，自然成文');
     const panel = win.document.querySelector('.preview-panel') as HTMLElement;
     const headings = [...panel.querySelectorAll<HTMLElement>('h1,h2')];
@@ -208,6 +212,11 @@ test('actual React UI: editing, menus, directory creation and persistent library
     assert.equal(win.document.querySelectorAll('.document-row').length, 1, 'leaving favorites restores the current directory');
     await act(async () => root.unmount()); root = createRoot(win.document.getElementById('root')!); await act(async () => root.render(React.createElement(App)));
     const creationCount = creations;
+    const beforeReveal = state().documents[4].content;
+    await click('文件'); await click('打开文件所在位置');
+    assert.equal(revealed.at(-1), '工作/项目/未命名.md', 'restored nested notes reveal their original file');
+    assert.equal(state().documents[4].content, beforeReveal, 'revealing a restored file keeps its draft');
+    assert.equal(creations, creationCount, 'revealing never creates or saves a file');
     await act(async () => win.dispatchEvent(new win.KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true })));
     assert.equal(creations, creationCount, 'nested notes reconnect after restart instead of creating root duplicates');
     assert.equal(state().documents[4].name, '未命名.md');
@@ -232,6 +241,7 @@ test('actual React UI: editing, menus, directory creation and persistent library
     while (win.document.querySelector('.tabs .icon-button')) await act(async () => (win.document.querySelector('.tabs .icon-button') as HTMLButtonElement).click());
     assert.ok(win.document.querySelector('[aria-label="笺墨欢迎页"]')); assert.equal(win.document.querySelector('.live-editor'), null); assert.equal(win.document.querySelector('.tabs'), null);
     assert.deepEqual(state().documents.map(doc => doc.content), beforeClose);
+    assert.ok(win.document.querySelector('.document-row'), 'workspace notes remain listed after their tabs close');
     await act(async () => (win.document.querySelector('.document-row') as HTMLButtonElement).click());
     assert.ok(win.document.querySelector('.live-editor')); assert.equal(win.document.querySelector('.welcome-page'), null); assert.ok(win.document.querySelector('.tabs'));
     await act(async () => win.document.querySelector('.document-row')!.dispatchEvent(new win.MouseEvent('contextmenu', { bubbles: true })));

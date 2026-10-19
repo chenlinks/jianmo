@@ -9,7 +9,7 @@ import type { ParagraphAction } from './core/paragraph.ts';
 import { cacheImagePreview, imagePreview } from './core/image-assets.ts';
 import { listKey } from './core/lists.ts';
 import { renderMarkdown } from './core/markdown.ts';
-import { download, isDesktop, openNativeFile, readBrowserFile, saveNativeFile, watchNativeFiles } from './platform/files.ts';
+import { download, isDesktop, openNativeFile, readBrowserFile, revealNativeFile, saveNativeFile, watchNativeFiles } from './platform/files.ts';
 import Icon from './components/Icon.tsx';
 import Logo from './components/Logo.tsx';
 import { useNotebookLocation } from './components/useNotebookLocation.ts';
@@ -76,7 +76,8 @@ export default function App() {
   const directoryNames = notebook.trail.slice(1).map(entry => entry.name);
   const directoryKey = JSON.stringify(directoryNames);
   const inDirectory = (doc: Document) => JSON.stringify(doc.noteDirectory ?? []) === directoryKey && (!doc.noteLocation || doc.noteLocation === notebook.trail[0]?.locationId);
-  const visible = state.documents.filter(d => !d.trash && (starredOnly ? d.starred : inDirectory(d)) && `${d.name}\n${d.content}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+  // Cached drafts outside the notebook belong in the list only while their tab is open.
+  const visible = state.documents.filter(d => !d.trash && (d.noteLocation || tabs.includes(d.id)) && (starredOnly ? d.starred : inDirectory(d)) && `${d.name}\n${d.content}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   const folders = starredOnly ? [] : notebook.entries.filter(entry => entry.kind === 'directory' && entry.name !== '.assets' && !originalTrashName(entry.name) && entry.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   const unopened = starredOnly ? [] : notebook.entries.filter(entry => entry.kind === 'file' && !originalTrashName(entry.name) && entry.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()) && !state.documents.some(doc => !doc.trash && (doc.nativeHandle === entry.handle || (inDirectory(doc) && doc.noteLocation === notebook.trail[0]?.locationId && doc.noteName === entry.name))));
 
@@ -322,6 +323,21 @@ export default function App() {
       setNotice([imported ? `已导入 ${imported} 个文件` : '', ...errors].filter(Boolean).join('；'));
     });
   }
+  function revealFileLocation() {
+    const snapshot = current;
+    void run(async () => {
+      let handle = snapshot.nativeHandle;
+      if (!handle) {
+        const root = notebook.trail[0] ?? await getNotebookLocation();
+        if (snapshot.noteLocation !== root.locationId) throw new Error('请先切换回该文件的笔记存储目录');
+        const parent = await resolveNotebookDirectory(root, snapshot.noteDirectory ?? []);
+        const entry = (await listNotebook(parent.handle)).find(entry => entry.kind === 'file' && entry.name === snapshot.noteName);
+        if (!entry) throw new Error('原文件已移动或删除，请刷新目录');
+        handle = (await openNotebookFile(entry.handle)).handle;
+      }
+      await revealNativeFile(handle);
+    });
+  }
   function isFileDrag(event: React.DragEvent) { return Array.from(event.dataTransfer.types).includes('Files'); }
   function clearFileDrag() { dragDepth.current = 0; setDraggingFiles(false); }
   function openDirectory(useDefault = false) {
@@ -479,6 +495,7 @@ export default function App() {
     { label: '文件', accessKey: 'F', items: [
       { label: '新建文档', shortcut: 'Ctrl N', action: openNew },
       { label: '打开文件', shortcut: 'Ctrl O', action: openFile, disabled: busy },
+      { label: '打开文件所在位置', action: revealFileLocation, disabled: busy || !hasDocument || !isDesktop() || !(current.nativeHandle || (current.noteLocation && current.noteName)) },
       { label: '笔记存储位置', action: () => setDialog('settings') },
       { label: '关闭文档', shortcut: 'Ctrl W', disabled: !hasDocument, action: () => closeTab(current.id) },
       { label: '另存为 Markdown', shortcut: 'Ctrl Shift S', action: () => saveFile(true), disabled: busy || !hasDocument, separator: true },

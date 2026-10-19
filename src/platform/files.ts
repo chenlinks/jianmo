@@ -11,6 +11,9 @@ export function displayFilePath(path: string): string {
 export async function openNativeFile(): Promise<NativeFile | null> {
   return window.__TAURI__!.core.invoke<NativeFile | null>('open_document');
 }
+export async function revealNativeFile(handle: string): Promise<void> {
+  await window.__TAURI__!.core.invoke('reveal_document', { handle });
+}
 export type NativeOpenResult = { status: 'opened'; value: NativeFile } | { status: 'error'; value: string };
 export function watchNativeFiles(onOpen: (results: NativeOpenResult[]) => void, onError: (error: unknown) => void): () => void {
   const tauri = window.__TAURI__;

@@ -40,6 +40,16 @@ async fn open_document(app: AppHandle) -> Result<Option<NativeFile>, String> {
 }
 
 #[tauri::command]
+async fn reveal_document(app: AppHandle, handle: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let registry = app.state::<FileRegistry>();
+        let path = registry.files.lock().map_err(|_| "文件状态不可用")?
+            .get(&handle).ok_or("文件会话已失效，请重新打开文件")?.path.clone();
+        files::reveal_document(&path)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 async fn save_document(app: AppHandle, handle: Option<String>, name: String, content: String) -> Result<Option<NativeFile>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let registry = app.state::<FileRegistry>();
@@ -86,7 +96,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(FileRegistry::default())
         .manage(notebooks::NotebookRegistry::default())
-        .invoke_handler(tauri::generate_handler![open_document, save_document, launch::take_pending_documents, notebooks::open_notebook, notebooks::list_notebook, notebooks::open_notebook_file, notebooks::create_notebook_entry, notebooks::get_notebook_location, notebooks::reset_notebook_location, notebooks::rename_notebook_entry, notebooks::rename_document, notebooks::store_notebook_image, notebooks::read_notebook_image, notebooks::get_data_location])
+        .invoke_handler(tauri::generate_handler![open_document, reveal_document, save_document, launch::take_pending_documents, notebooks::open_notebook, notebooks::list_notebook, notebooks::open_notebook_file, notebooks::create_notebook_entry, notebooks::get_notebook_location, notebooks::reset_notebook_location, notebooks::rename_notebook_entry, notebooks::rename_document, notebooks::store_notebook_image, notebooks::read_notebook_image, notebooks::get_data_location])
         .run(tauri::generate_context!())
         .expect("启动笺墨失败");
 }
