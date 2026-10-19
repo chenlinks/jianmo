@@ -1,6 +1,6 @@
 import { normalizeName } from '../core/documents.ts';
 export interface NativeFile { handle: string; path: string; name: string; content: string }
-declare global { interface Window { __TAURI__?: { core: { invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> } } } }
+declare global { interface Window { __TAURI__?: { core: { invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> }; event?: { listen(event: string, callback: () => void): Promise<() => void> } } } }
 export const isDesktop = () => Boolean(window.__TAURI__?.core);
 // Format Windows canonical paths for display only; native paths and identities stay intact.
 export function displayFilePath(path: string): string {
@@ -10,6 +10,34 @@ export function displayFilePath(path: string): string {
 }
 export async function openNativeFile(): Promise<NativeFile | null> {
   return window.__TAURI__!.core.invoke<NativeFile | null>('open_document');
+}
+export type NativeOpenResult = { status: 'opened'; value: NativeFile } | { status: 'error'; value: string };
+export function watchNativeFiles(onOpen: (results: NativeOpenResult[]) => void, onError: (error: unknown) => void): () => void {
+  const tauri = window.__TAURI__;
+  if (!tauri?.event) return () => {};
+  let stopped = false; let unlisten: (() => void) | undefined;
+  let draining = false; let requested = false;
+  async function drain() {
+    requested = true;
+    if (draining || stopped) return;
+    draining = true;
+    try {
+      do {
+        requested = false;
+        const results = await tauri!.core.invoke<NativeOpenResult[]>('take_pending_documents');
+        // A completed drain has consumed the queue, so always deliver its results.
+        if (results.length) onOpen(results);
+      } while (requested && !stopped);
+    } catch (error) { onError(error); }
+    finally { draining = false; }
+  }
+  void tauri.event.listen('documents-pending', () => { void drain(); }).then(stop => {
+    if (stopped) { stop(); return; }
+    unlisten = stop;
+    // Subscribe before draining to cover launches while the webview is loading.
+    void drain();
+  }).catch(onError);
+  return () => { stopped = true; unlisten?.(); };
 }
 export async function saveNativeFile(content: string, name: string, handle?: string): Promise<NativeFile | null> {
   return window.__TAURI__!.core.invoke<NativeFile | null>('save_document', { content, name: normalizeName(name), handle: handle ?? null });

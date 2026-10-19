@@ -9,7 +9,7 @@ import type { ParagraphAction } from './core/paragraph.ts';
 import { cacheImagePreview, imagePreview } from './core/image-assets.ts';
 import { listKey } from './core/lists.ts';
 import { renderMarkdown } from './core/markdown.ts';
-import { download, isDesktop, openNativeFile, readBrowserFile, saveNativeFile } from './platform/files.ts';
+import { download, isDesktop, openNativeFile, readBrowserFile, saveNativeFile, watchNativeFiles } from './platform/files.ts';
 import Icon from './components/Icon.tsx';
 import Logo from './components/Logo.tsx';
 import { useNotebookLocation } from './components/useNotebookLocation.ts';
@@ -66,6 +66,7 @@ export default function App() {
   const preview = useRef<HTMLElement>(null);
   const [activeHeading, setActiveHeading] = useState('');
   const latest = useRef(state); latest.current = state;
+  const externalPaths = useRef<string[]>([]);
   const current = state.documents.find(d => d.id === state.activeId)!;
   const hasDocument = tabs.includes(current.id) && !current.trash;
   const [imageVersion, setImageVersion] = useState(0);
@@ -78,6 +79,36 @@ export default function App() {
   const visible = state.documents.filter(d => !d.trash && (starredOnly ? d.starred : inDirectory(d)) && `${d.name}\n${d.content}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   const folders = starredOnly ? [] : notebook.entries.filter(entry => entry.kind === 'directory' && entry.name !== '.assets' && !originalTrashName(entry.name) && entry.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   const unopened = starredOnly ? [] : notebook.entries.filter(entry => entry.kind === 'file' && !originalTrashName(entry.name) && entry.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()) && !state.documents.some(doc => !doc.trash && (doc.nativeHandle === entry.handle || (inDirectory(doc) && doc.noteLocation === notebook.trail[0]?.locationId && doc.noteName === entry.name))));
+
+  useEffect(() => watchNativeFiles(results => {
+    const files = results.flatMap(result => result.status === 'opened' ? [result.value] : []);
+    const errors = results.flatMap(result => result.status === 'error' ? [result.value] : []);
+    if (files.length) {
+      externalPaths.current.push(...files.map(file => file.path));
+      // Use one state update for the whole batch, including repeated paths.
+      const incoming = files.map(file => ({ ...newDocument(file.name, file.content), savedContent: file.content, nativeHandle: file.handle, path: file.path }));
+      setState(previous => {
+        const documents = [...previous.documents]; let activeId = previous.activeId;
+        for (const doc of incoming) {
+          const existing = documents.find(item => item.path === doc.path || item.nativeHandle === doc.nativeHandle);
+          if (existing) activeId = existing.id;
+          else { documents.push(doc); activeId = doc.id; }
+        }
+        return { ...previous, documents, activeId };
+      });
+      setQuery(''); setStarredOnly(false); setView('read'); setDialog(null); setMedia(null); setContextMenu(null);
+    }
+    if (errors.length) setNotice(errors.join('；'));
+  }, error => setNotice(error instanceof Error ? error.message : String(error))), []);
+  useEffect(() => {
+    if (!externalPaths.current.length) return;
+    const paths = new Set(externalPaths.current);
+    const opened = state.documents.filter(doc => doc.path && paths.has(doc.path));
+    const resolved = new Set(opened.map(doc => doc.path));
+    externalPaths.current = externalPaths.current.filter(path => !resolved.has(path));
+    const ids = opened.map(doc => doc.id);
+    setTabs(previous => [...new Set([...previous, ...ids])]);
+  }, [state]);
 
   useEffect(() => {
     let cancelled = false;
