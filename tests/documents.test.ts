@@ -13,11 +13,23 @@ test('saving an earlier snapshot never clears edits made while save was pending'
 test('successful save clears the exact snapshot only', () => {
   const doc = newDocument('test.md', '文稿'); assert.equal(isDirty(saved(doc, '文稿', {})), false);
 });
-test('drafts round-trip without persisting native session permissions', () => {
-  const state = initialWorkspace(); state.documents[0].nativeHandle = 'session'; state.documents[0].path = 'C:/secret.md';
-  const serialized = serializeWorkspace(state); assert.ok(!serialized.includes('secret.md')); assert.ok(!serialized.includes('session'));
+test('external files never persist content, identity or tabs; notebook drafts still round-trip', () => {
+  const state = initialWorkspace();
+  const external = { ...newDocument('secret.md', 'external content'), nativeHandle: 'session', path: 'C:/secret.md' };
+  state.documents.push(external); state.activeId = external.id; state.openTabs = [external.id, state.documents[0].id];
+  state.documents[0].nativeHandle = 'notebook-session'; state.documents[0].path = 'C:/notes/note.md'; state.documents[0].noteLocation = 'notes';
+  const serialized = serializeWorkspace(state);
+  for (const value of ['secret.md', 'external content', 'session', external.id]) assert.ok(!serialized.includes(value));
   const result = parseWorkspace(serialized); assert.equal(result.documents[0].content, state.documents[0].content);
-  assert.equal(result.activeId, state.activeId); assert.equal(result.documents[0].nativeHandle, undefined);
+  assert.equal(result.activeId, state.documents[0].id); assert.equal(result.documents[0].nativeHandle, undefined);
+  assert.deepEqual(result.openTabs, [state.documents[0].id]);
+});
+
+test('an external-only session reloads without restoring any external files', () => {
+  const state = initialWorkspace(); const external = { ...newDocument('external.md', 'private text'), externalFile: true };
+  state.documents = [external]; state.activeId = external.id; state.openTabs = [external.id];
+  const result = parseWorkspace(serializeWorkspace(state));
+  assert.deepEqual(result.openTabs, []); assert.equal(result.documents.length, 1); assert.equal(result.documents[0].content, '');
 });
 test('corrupt storage does not get replaced by a fresh demo workspace', () => {
   const original = '{broken'; let writes = 0;

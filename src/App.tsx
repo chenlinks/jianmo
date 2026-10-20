@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { edited, isDirty, loadWorkspace, newDocument, normalizeName, saved, serializeWorkspace, STORAGE_KEY, wordCount } from './core/documents.ts';
+import { edited, isDirty, isExternalFile, refreshed, loadWorkspace, newDocument, normalizeName, saved, serializeWorkspace, STORAGE_KEY, wordCount } from './core/documents.ts';
 import type { Document, ViewMode, Workspace } from './core/documents.ts';
 import { formatSelection } from './core/format.ts';
 import type { Format } from './core/format.ts';
@@ -9,7 +9,7 @@ import type { ParagraphAction } from './core/paragraph.ts';
 import { cacheImagePreview, imagePreview } from './core/image-assets.ts';
 import { listKey } from './core/lists.ts';
 import { renderMarkdown } from './core/markdown.ts';
-import { download, isDesktop, openNativeFile, readBrowserFile, revealNativeFile, saveNativeFile, watchNativeFiles } from './platform/files.ts';
+import { download, isDesktop, openNativeFile, readNativeFile, readBrowserFile, revealNativeFile, saveNativeFile, watchNativeFiles } from './platform/files.ts';
 import Icon from './components/Icon.tsx';
 import Logo from './components/Logo.tsx';
 import { useNotebookLocation } from './components/useNotebookLocation.ts';
@@ -76,7 +76,7 @@ export default function App() {
   const directoryNames = notebook.trail.slice(1).map(entry => entry.name);
   const directoryKey = JSON.stringify(directoryNames);
   const inDirectory = (doc: Document) => JSON.stringify(doc.noteDirectory ?? []) === directoryKey && (!doc.noteLocation || doc.noteLocation === notebook.trail[0]?.locationId);
-  // Cached drafts outside the notebook belong in the list only while their tab is open.
+  // External files belong in the list only while their tab is open.
   const visible = state.documents.filter(d => !d.trash && (d.noteLocation || tabs.includes(d.id)) && (starredOnly ? d.starred : inDirectory(d)) && `${d.name}\n${d.content}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   const folders = starredOnly ? [] : notebook.entries.filter(entry => entry.kind === 'directory' && entry.name !== '.assets' && !originalTrashName(entry.name) && entry.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   const unopened = starredOnly ? [] : notebook.entries.filter(entry => entry.kind === 'file' && !originalTrashName(entry.name) && entry.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()) && !state.documents.some(doc => !doc.trash && (doc.nativeHandle === entry.handle || (inDirectory(doc) && doc.noteLocation === notebook.trail[0]?.locationId && doc.noteName === entry.name))));
@@ -87,12 +87,15 @@ export default function App() {
     if (files.length) {
       externalPaths.current.push(...files.map(file => file.path));
       // Use one state update for the whole batch, including repeated paths.
-      const incoming = files.map(file => ({ ...newDocument(file.name, file.content), savedContent: file.content, nativeHandle: file.handle, path: file.path }));
+      const incoming = files.map(file => ({ ...newDocument(file.name, file.content), savedContent: file.content, nativeHandle: file.handle, path: file.path, externalFile: true }));
       setState(previous => {
         const documents = [...previous.documents]; let activeId = previous.activeId;
         for (const doc of incoming) {
           const existing = documents.find(item => item.path === doc.path || item.nativeHandle === doc.nativeHandle);
-          if (existing) activeId = existing.id;
+          if (existing) {
+            documents[documents.indexOf(existing)] = refreshed(existing, { ...doc, handle: doc.nativeHandle });
+            activeId = existing.id;
+          }
           else { documents.push(doc); activeId = doc.id; }
         }
         return { ...previous, documents, activeId };
@@ -110,6 +113,24 @@ export default function App() {
     const ids = opened.map(doc => doc.id);
     setTabs(previous => [...new Set([...previous, ...ids])]);
   }, [state]);
+
+  useEffect(() => {
+    if (!hasDocument || !isDesktop() || !isExternalFile(current) || !current.nativeHandle) return;
+    let stopped = false; let request = 0;
+    async function refresh() {
+      const snapshot = latest.current.documents.find(doc => doc.id === current.id);
+      if (!snapshot?.nativeHandle || isDirty(snapshot)) return;
+      const ticket = ++request;
+      try {
+        const file = await readNativeFile(snapshot.nativeHandle);
+        if (!stopped && ticket === request) update(snapshot.id, doc => doc.content === snapshot.content && doc.savedContent === snapshot.savedContent ? refreshed(doc, file) : doc);
+      } catch (error) { if (!stopped && ticket === request) setNotice(error instanceof Error ? error.message : String(error)); }
+    }
+    void refresh();
+    const onVisible = () => { if (document.visibilityState === 'visible') void refresh(); };
+    window.addEventListener('focus', refresh); document.addEventListener('visibilitychange', onVisible);
+    return () => { stopped = true; window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', onVisible); };
+  }, [current.id, current.nativeHandle, current.noteLocation, hasDocument]);
 
   useEffect(() => {
     let cancelled = false;
@@ -150,7 +171,11 @@ export default function App() {
   }, [current.id, current.content, imageContext, notebook.trail[0]?.locationId]);
   function closeTab(id: string) {
     const next = tabs.filter(tab => tab !== id); setTabs(next);
-    if (id === current.id && next.length) setState(state => ({ ...state, activeId: next[next.length - 1] }));
+    setState(state => {
+      const documents = state.documents.filter(doc => doc.id !== id || !isExternalFile(doc));
+      if (!documents.length) documents.push(newDocument('未命名.md', ''));
+      return { ...state, documents, activeId: state.activeId === id ? next.at(-1) ?? documents[0].id : state.activeId };
+    });
     setMedia(null); setContextMenu(null);
   }
   function syncOutline() {
@@ -172,7 +197,7 @@ export default function App() {
   }, [state, tabs, boot.writable, current.name, hasDocument]);
   useEffect(() => { if (!notice) return; const id = setTimeout(() => setNotice(''), 2000); return () => clearTimeout(id); }, [notice]);
   useEffect(() => {
-    function beforeUnload(e: BeforeUnloadEvent) { if (cacheError) { e.preventDefault(); e.returnValue = ''; } }
+    function beforeUnload(e: BeforeUnloadEvent) { if (cacheError || latest.current.documents.some(doc => isExternalFile(doc) && isDirty(doc))) { e.preventDefault(); e.returnValue = ''; } }
     window.addEventListener('beforeunload', beforeUnload); return () => window.removeEventListener('beforeunload', beforeUnload);
   }, [cacheError]);
   useEffect(() => {
@@ -304,8 +329,8 @@ export default function App() {
     void run(async () => {
       const file = await openNativeFile(); if (!file) return;
       const existing = latest.current.documents.find(d => d.path === file.path);
-      if (existing) { activate(existing.id); setNotice('文件已在文档库中，保留当前编辑内容'); return; }
-      add({ ...newDocument(file.name, file.content), savedContent: file.content, nativeHandle: file.handle, path: file.path });
+      if (existing) { update(existing.id, doc => refreshed(doc, file)); activate(existing.id); setNotice(isDirty(existing) ? '已保留当前未保存的编辑' : '已读取最新文件'); return; }
+      add({ ...newDocument(file.name, file.content), savedContent: file.content, nativeHandle: file.handle, path: file.path, externalFile: true });
       setNotice('文件已打开');
     });
   }
@@ -316,7 +341,7 @@ export default function App() {
       for (const file of files) {
         try {
           const data = await readBrowserFile(file);
-          add({ ...newDocument(data.name, data.content), savedContent: data.content }); imported++;
+          add({ ...newDocument(data.name, data.content), savedContent: data.content, externalFile: true }); imported++;
         } catch (error) { errors.push(`${file.name}：${error instanceof Error ? error.message : String(error)}`); }
       }
       if (imported && read) { setView('read'); setMedia(null); setContextMenu(null); }
@@ -394,7 +419,7 @@ export default function App() {
         notebook.setError(''); setNotice('已保存到笔记目录'); return;
       }
       if (isDesktop()) {
-        const result = await saveNativeFile(snapshot.content, snapshot.name, asNew ? undefined : snapshot.nativeHandle);
+        const result = await saveNativeFile(snapshot.content, snapshot.name, asNew ? undefined : snapshot.nativeHandle, asNew ? undefined : snapshot.savedContent);
         if (!result) return;
         update(snapshot.id, doc => ({ ...saved(doc, snapshot.content, result), ...(asNew ? { noteLocation: undefined, noteName: undefined, noteDirectory: undefined } : {}) })); setNotice('已保存到文件');
       } else if (!asNew && snapshot.nativeHandle) {

@@ -279,7 +279,8 @@ test('actual React UI: editing, menus, directory creation and persistent library
     await click('视图'); await click('源码模式');
     const dropped = await drag('drop', win.document.querySelector('textarea')!, [new File(['# 拖入阅读'], '拖入.MD'), new File(['bad'], 'bad.pdf'), new File(['# 第二篇'], '第二篇.markdown'), new File(['纯文本'], '文本.txt')]);
     assert.equal(dropped.event.defaultPrevented, true);
-    assert.equal(state().documents.length, beforeDrop.length + 3);
+    assert.equal(state().documents.length, beforeDrop.length, 'dropped external files are not cached');
+    for (const name of ['拖入.MD', '第二篇.markdown', '文本.txt']) assert.ok(win.document.querySelector(`[aria-label="关闭标签 ${name}"]`));
     for (const doc of beforeDrop) assert.equal(state().documents.find(item => item.id === doc.id)!.content, doc.content);
     assert.ok(win.document.querySelector('.live-editor')); assert.equal(win.document.querySelector('textarea'), null);
     assert.match(win.document.querySelector('.live-editor')!.textContent!, /纯文本/);
@@ -293,7 +294,8 @@ test('actual React UI: editing, menus, directory creation and persistent library
     await drag('drop', win.document.querySelector('.welcome-page')!, [new File(['# 欢迎页拖入'], '欢迎.md')]);
     assert.equal(win.document.querySelector('.markdown-body h1')?.textContent, '欢迎页拖入');
     await act(async () => root.unmount()); root = createRoot(win.document.getElementById('root')!); await act(async () => root.render(React.createElement(App)));
-    assert.equal(win.document.querySelector('.markdown-body h1')?.textContent, '欢迎页拖入', 'dropped documents survive draft recovery');
+    assert.ok(win.document.querySelector('.welcome-page'), 'external files are not restored from draft storage');
+    assert.ok(!win.localStorage.getItem(STORAGE_KEY)!.includes('欢迎页拖入'));
 
   } finally { await act(async () => root.unmount()); dom.window.close(); }
 });

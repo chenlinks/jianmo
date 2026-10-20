@@ -29,6 +29,27 @@ fn open_path(registry: &FileRegistry, path: &std::path::Path) -> Result<NativeFi
     Ok(payload(handle, &path, content))
 }
 
+fn read_opened_file(registry: &FileRegistry, handle: String) -> Result<NativeFile, String> {
+    let path = registry.files.lock().map_err(|_| "文件状态不可用")?
+        .get(&handle).ok_or("文件会话已失效，请重新打开文件")?.path.clone();
+    if path.canonicalize().map_err(|_| "原文件已移动、删除或无法访问")? != path {
+        return Err("文件位置发生变化，请重新打开文件".into());
+    }
+    let content = files::read_document(&path)?;
+    Ok(payload(handle, &path, content))
+}
+
+fn save_opened_file(registry: &FileRegistry, id: String, content: String, expected: Option<&str>) -> Result<NativeFile, String> {
+    let mut opened = registry.files.lock().map_err(|_| "文件状态不可用".to_string())?;
+    let entry = opened.get_mut(&id).ok_or("文件会话已失效，请使用另存为")?;
+    if entry.path.canonicalize().map_err(|_| "原文件已移动，请使用另存为")? != entry.path {
+        return Err("文件位置发生变化，请使用另存为".into());
+    }
+    files::save_document(&entry.path, &content, Some(expected.unwrap_or(&entry.baseline)))?;
+    entry.baseline = content.clone();
+    Ok(payload(id, &entry.path, content))
+}
+
 #[tauri::command]
 async fn open_document(app: AppHandle) -> Result<Option<NativeFile>, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -36,6 +57,13 @@ async fn open_document(app: AppHandle) -> Result<Option<NativeFile>, String> {
         let Some(selected) = selected else { return Ok(None); };
         let path = selected.into_path().map_err(|e| e.to_string())?;
         open_path(&app.state::<FileRegistry>(), &path).map(Some)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn read_document(app: AppHandle, handle: String) -> Result<NativeFile, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        read_opened_file(&app.state::<FileRegistry>(), handle)
     }).await.map_err(|e| e.to_string())?
 }
 
@@ -50,18 +78,11 @@ async fn reveal_document(app: AppHandle, handle: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn save_document(app: AppHandle, handle: Option<String>, name: String, content: String) -> Result<Option<NativeFile>, String> {
+async fn save_document(app: AppHandle, handle: Option<String>, name: String, content: String, expected: Option<String>) -> Result<Option<NativeFile>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let registry = app.state::<FileRegistry>();
         if let Some(id) = handle {
-            let mut opened = registry.files.lock().map_err(|_| "文件状态不可用".to_string())?;
-            let entry = opened.get_mut(&id).ok_or("文件会话已失效，请使用另存为")?;
-            if entry.path.canonicalize().map_err(|_| "原文件已移动，请使用另存为")? != entry.path {
-                return Err("文件位置发生变化，请使用另存为".into());
-            }
-            files::save_document(&entry.path, &content, Some(&entry.baseline))?;
-            entry.baseline = content.clone();
-            return Ok(Some(payload(id, &entry.path, content)));
+            return save_opened_file(&registry, id, content, expected.as_deref()).map(Some);
         }
         // The frontend never supplies an arbitrary path; every new destination comes from this dialog.
         let safe_name = std::path::Path::new(&name).file_name().and_then(|v| v.to_str()).unwrap_or("未命名.md");
@@ -96,7 +117,34 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(FileRegistry::default())
         .manage(notebooks::NotebookRegistry::default())
-        .invoke_handler(tauri::generate_handler![open_document, reveal_document, save_document, launch::take_pending_documents, notebooks::open_notebook, notebooks::list_notebook, notebooks::open_notebook_file, notebooks::create_notebook_entry, notebooks::get_notebook_location, notebooks::reset_notebook_location, notebooks::rename_notebook_entry, notebooks::rename_document, notebooks::store_notebook_image, notebooks::read_notebook_image, notebooks::get_data_location])
+        .invoke_handler(tauri::generate_handler![open_document, read_document, reveal_document, save_document, launch::take_pending_documents, notebooks::open_notebook, notebooks::list_notebook, notebooks::open_notebook_file, notebooks::create_notebook_entry, notebooks::get_notebook_location, notebooks::reset_notebook_location, notebooks::rename_notebook_entry, notebooks::rename_document, notebooks::store_notebook_image, notebooks::read_notebook_image, notebooks::get_data_location])
         .run(tauri::generate_context!())
         .expect("启动笺墨失败");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rereads_disk_and_saves_against_the_version_shown_in_the_editor() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("external.md");
+        std::fs::write(&path, "first").unwrap();
+        let registry = FileRegistry::default();
+        let first = open_path(&registry, &path).unwrap();
+        std::fs::write(&path, "second").unwrap();
+        let fresh = read_opened_file(&registry, first.handle.clone()).unwrap();
+        assert_eq!(fresh.content, "second");
+        // A refresh must not authorize overwriting an older, dirty editor snapshot.
+        assert!(save_opened_file(&registry, first.handle.clone(), "old draft".into(), Some("first")).is_err());
+        save_opened_file(&registry, fresh.handle.clone(), "edited second".into(), Some(&fresh.content)).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "edited second");
+        std::fs::write(&path, "third").unwrap();
+        assert!(save_opened_file(&registry, fresh.handle.clone(), "conflict".into(), Some("edited second")).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "third");
+        std::fs::remove_file(&path).unwrap();
+        assert!(read_opened_file(&registry, fresh.handle).is_err());
+        assert!(read_opened_file(&registry, "unknown".into()).is_err());
+    }
 }

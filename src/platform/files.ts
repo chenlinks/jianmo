@@ -11,6 +11,9 @@ export function displayFilePath(path: string): string {
 export async function openNativeFile(): Promise<NativeFile | null> {
   return window.__TAURI__!.core.invoke<NativeFile | null>('open_document');
 }
+export async function readNativeFile(handle: string): Promise<NativeFile> {
+  return window.__TAURI__!.core.invoke<NativeFile>('read_document', { handle });
+}
 export async function revealNativeFile(handle: string): Promise<void> {
   await window.__TAURI__!.core.invoke('reveal_document', { handle });
 }
@@ -42,8 +45,8 @@ export function watchNativeFiles(onOpen: (results: NativeOpenResult[]) => void, 
   }).catch(onError);
   return () => { stopped = true; unlisten?.(); };
 }
-export async function saveNativeFile(content: string, name: string, handle?: string): Promise<NativeFile | null> {
-  return window.__TAURI__!.core.invoke<NativeFile | null>('save_document', { content, name: normalizeName(name), handle: handle ?? null });
+export async function saveNativeFile(content: string, name: string, handle?: string, expected?: string | null): Promise<NativeFile | null> {
+  return window.__TAURI__!.core.invoke<NativeFile | null>('save_document', { content, name: normalizeName(name), handle: handle ?? null, ...(expected != null ? { expected } : {}) });
 }
 export async function readBrowserFile(file: File): Promise<{ name: string; content: string }> {
   if (!/\.(md|markdown|txt)$/i.test(file.name)) throw new Error('请选择 .md、.markdown 或 .txt 文件');

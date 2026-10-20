@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readBrowserFile, saveNativeFile, openNativeFile, watchNativeFiles } from '../src/platform/files.ts';
+import { readBrowserFile, saveNativeFile, openNativeFile, readNativeFile, watchNativeFiles } from '../src/platform/files.ts';
 import type { NativeOpenResult } from '../src/platform/files.ts';
 test('browser import validates extension and UTF-8 without an application size cap', async () => {
   await assert.rejects(readBrowserFile(new File(['test'], 'test.exe')), /请选择/);
@@ -51,4 +51,8 @@ test('native bridge preserves cancellation and sends handles rather than arbitra
   Object.defineProperty(globalThis, 'window', { value: { __TAURI__: { core: { invoke: async (command: string, args?: Record<string, unknown>) => { calls.push({ command, args }); return null; } } } }, configurable: true });
   assert.equal(await openNativeFile(), null); assert.equal(await saveNativeFile('draft', 'name', 'token'), null);
   assert.deepEqual(calls[1], { command: 'save_document', args: { content: 'draft', name: 'name.md', handle: 'token' } });
+  await readNativeFile('token');
+  assert.deepEqual(calls[2], { command: 'read_document', args: { handle: 'token' } });
+  await saveNativeFile('edited', 'name', 'token', 'fresh disk content');
+  assert.deepEqual(calls[3], { command: 'save_document', args: { content: 'edited', name: 'name.md', handle: 'token', expected: 'fresh disk content' } });
 });

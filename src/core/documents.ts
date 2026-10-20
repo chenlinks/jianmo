@@ -3,6 +3,7 @@ export type ViewMode = 'read' | 'edit' | 'split';
 export interface Document {
   id: string; name: string; content: string; savedContent: string | null;
   updatedAt: number; starred: boolean; nativeHandle?: string; path?: string; noteLocation?: string; noteName?: string; noteDirectory?: string[];
+  externalFile?: boolean;
   trash?: { name: string; parent: string[]; location?: string };
 }
 export interface Workspace { version: 1; openTabs?: string[]; documents: Document[]; activeId: string; theme: Theme; fontSize: number; defaultView?: ViewMode; spellcheck?: boolean; pageWidth?: 'normal' | 'wide' }
@@ -15,6 +16,11 @@ export function normalizeName(value: string): string {
   return /\.(md|markdown|txt)$/i.test(name) ? name : `${name}.md`;
 }
 export function isDirty(doc: Document): boolean { return doc.savedContent !== doc.content; }
+export function isExternalFile(doc: Document): boolean { return !doc.noteLocation && Boolean(doc.externalFile || doc.nativeHandle || doc.path); }
+export function refreshed(doc: Document, file: { content: string; name: string; handle: string; path: string }): Document {
+  // Never replace edits made while a disk read was pending.
+  return isDirty(doc) ? doc : { ...doc, content: file.content, savedContent: file.content, name: file.name, nativeHandle: file.handle, path: file.path };
+}
 export function edited(doc: Document, content: string): Document { return { ...doc, content, updatedAt: Date.now() }; }
 // Apply the exact snapshot written to disk; typing during an asynchronous save remains dirty.
 export function saved(doc: Document, snapshot: string, result: { name?: string; handle?: string; path?: string }): Document {
@@ -27,14 +33,16 @@ export function initialWorkspace(): Workspace {
   return { version: 1, documents: [welcome, note], activeId: welcome.id, theme: 'light', fontSize: 17 };
 }
 export function serializeWorkspace(state: Workspace): string {
-  // Native handles are session-local. Restored drafts use Save As until a file is reopened.
-  return JSON.stringify({ ...state, documents: state.documents.map(({ nativeHandle: _h, path: _p, ...doc }) => doc) });
+  const documents = state.documents.filter(doc => !isExternalFile(doc));
+  return JSON.stringify({ ...state, activeId: documents.some(doc => doc.id === state.activeId) ? state.activeId : documents[0]?.id ?? '',
+    openTabs: state.openTabs?.filter(id => documents.some(doc => doc.id === id)),
+    documents: documents.map(({ nativeHandle: _h, path: _p, ...doc }) => doc) });
 }
 export function parseWorkspace(raw: string): Workspace {
   const data = JSON.parse(raw) as Partial<Workspace>;
-  if (data.version !== 1 || !Array.isArray(data.documents) || !data.documents.length) throw new Error('草稿格式不受支持');
+  if (data.version !== 1 || !Array.isArray(data.documents)) throw new Error('草稿格式不受支持');
   const ids = new Set<string>();
-  const documents = data.documents.map((doc) => {
+  const documents: Document[] = data.documents.map((doc) => {
     if (!doc || typeof doc.id !== 'string' || ids.has(doc.id) || typeof doc.name !== 'string' || typeof doc.content !== 'string' || !(doc.savedContent === null || typeof doc.savedContent === 'string')) throw new Error('草稿内容损坏');
     ids.add(doc.id);
     if (doc.noteDirectory !== undefined && (!Array.isArray(doc.noteDirectory) || !doc.noteDirectory.every(name => typeof name === 'string' && name.length > 0 && name !== '.' && name !== '..' && !/[\\/]/.test(name)))) throw new Error('草稿目录信息损坏');
@@ -42,6 +50,7 @@ export function parseWorkspace(raw: string): Workspace {
       noteLocation: typeof doc.noteLocation === 'string' ? doc.noteLocation : undefined, noteName: typeof doc.noteName === 'string' ? doc.noteName : undefined, noteDirectory: doc.noteDirectory,
       trash: doc.trash && typeof doc.trash.name === 'string' && Array.isArray(doc.trash.parent) && doc.trash.parent.every(part => typeof part === 'string') ? doc.trash : undefined };
   });
+  if (!documents.length) documents.push(newDocument('未命名.md', ''));
   return { version: 1, openTabs: Array.isArray(data.openTabs) ? data.openTabs.filter(id => typeof id === 'string' && documents.some(doc => doc.id === id && !doc.trash)) : undefined, documents, activeId: documents.some(d => d.id === data.activeId) ? data.activeId! : documents[0].id,
     theme: data.theme === 'dark' || data.theme === 'warm' ? data.theme : 'light',
     fontSize: typeof data.fontSize === 'number' && Number.isFinite(data.fontSize) ? Math.min(22, Math.max(14, data.fontSize)) : 17,
