@@ -12,11 +12,15 @@ test('external files read fresh disk content without draft caching and preserve 
   const file = { handle: 'os-file', path: 'C:\\文档\\中文 文件.md', name: '中文 文件.md', content: '# 双击打开' };
   let pending: unknown[] = [{ status: 'opened', value: file }];
   let notify: (() => void) | undefined; let saves = 0; let subscriptions = 0;
+  const focusListeners = new Set<() => void>();
   let pendingRead: ((result: typeof file) => void) | undefined; let delayRead = false;
   let other: typeof file | undefined;
   const revealed: string[] = []; let revealError = false;
   Object.defineProperty(win, '__TAURI__', { value: {
-    event: { listen: async (_event: string, callback: () => void) => { subscriptions++; notify = callback; return () => { subscriptions--; }; } },
+    event: { listen: async (event: string, callback: () => void) => {
+      if (event === 'tauri://focus') { focusListeners.add(callback); return () => { focusListeners.delete(callback); }; }
+      assert.equal(event, 'documents-pending'); subscriptions++; notify = callback; return () => { subscriptions--; };
+    } },
     core: { invoke: async (command: string, args: Record<string, string>) => {
       if (command === 'take_pending_documents') { const result = pending; pending = []; return result; }
       if (command === 'get_notebook_location') return { handle: 'root', kind: 'directory', name: '笺墨', locationId: 'root' };
@@ -67,6 +71,18 @@ test('external files read fresh disk content without draft caching and preserve 
     file.content = '# 返回窗口新内容';
     await act(async () => win.dispatchEvent(new win.Event('focus')));
     assert.equal(heading(), '返回窗口新内容');
+    assert.equal(focusListeners.size, 1, 'one native focus listener remains after StrictMode setup');
+    file.content = '# 原生窗口激活新内容';
+    await act(async () => { for (const listener of focusListeners) listener(); });
+    assert.equal(heading(), '原生窗口激活新内容', 'native activation refreshes without a DOM focus event');
+    const activeTab = () => win.document.querySelector<HTMLButtonElement>('.tabs .tab.active > button')!;
+    file.content = '# 当前标签再次激活';
+    await act(async () => activeTab().click());
+    assert.equal(heading(), '当前标签再次激活', 'clicking the current tab rereads the file');
+    file.content = '# 目录中再次激活';
+    const row = [...win.document.querySelectorAll<HTMLButtonElement>('.document-row')].find(row => row.textContent?.includes('中文 文件'))!;
+    await act(async () => row.click());
+    assert.equal(heading(), '目录中再次激活', 'reactivating the current file from the directory rereads it');
     await edit('未保存的修改');
     await deliver([{ status: 'opened', value: file }, { status: 'opened', value: file }]);
     assert.equal(win.document.querySelectorAll(`[aria-label="关闭标签 ${file.name}"]`).length, 1);
@@ -98,6 +114,9 @@ test('external files read fresh disk content without draft caching and preserve 
     file.content = '# 切换标签新内容';
     const tab = [...win.document.querySelectorAll<HTMLButtonElement>('.tabs button')].find(button => button.textContent?.includes(file.name.replace('.md', '')) && !button.classList.contains('icon-button'))!;
     await act(async () => tab.click()); assert.equal(heading(), '切换标签新内容');
+    const otherTab = [...win.document.querySelectorAll<HTMLButtonElement>('.tabs .tab > button:first-child')].find(button => button.textContent === other!.name)!;
+    await act(async () => otherTab.click());
+    assert.equal(heading(), '第二篇');
     await act(async () => win.document.querySelector<HTMLButtonElement>(`[aria-label="关闭标签 ${file.name}"]`)!.click());
     assert.equal(listed(file.name), false, 'closing an inactive external tab also removes its directory entry');
     assert.ok(listed(other.name));
@@ -106,5 +125,5 @@ test('external files read fresh disk content without draft caching and preserve 
     await act(async () => root.render(React.createElement(React.StrictMode, null, React.createElement(App))));
     assert.equal(listed(file.name), false, 'closed external files stay hidden after restarting');
     assert.equal(listed(other.name), false, 'external tabs and content are not restored from cache');
-  } finally { await act(async () => root.unmount()); assert.equal(subscriptions, 0); dom.window.close(); }
+  } finally { await act(async () => root.unmount()); assert.equal(subscriptions, 0); assert.equal(focusListeners.size, 0); dom.window.close(); }
 });

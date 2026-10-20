@@ -67,6 +67,7 @@ export default function App() {
   const [activeHeading, setActiveHeading] = useState('');
   const latest = useRef(state); latest.current = state;
   const externalPaths = useRef<string[]>([]);
+  const refreshActiveFile = useRef<(() => void) | null>(null);
   const current = state.documents.find(d => d.id === state.activeId)!;
   const hasDocument = tabs.includes(current.id) && !current.trash;
   const [imageVersion, setImageVersion] = useState(0);
@@ -126,10 +127,19 @@ export default function App() {
         if (!stopped && ticket === request) update(snapshot.id, doc => doc.content === snapshot.content && doc.savedContent === snapshot.savedContent ? refreshed(doc, file) : doc);
       } catch (error) { if (!stopped && ticket === request) setNotice(error instanceof Error ? error.message : String(error)); }
     }
+    refreshActiveFile.current = refresh;
     void refresh();
+    let unlistenFocus: (() => void) | undefined;
+    // Native window activation can happen without the webview receiving DOM focus.
+    void window.__TAURI__?.event?.listen('tauri://focus', refresh).then(unlisten => {
+      if (stopped) unlisten(); else unlistenFocus = unlisten;
+    }).catch(error => { if (!stopped) setNotice(error instanceof Error ? error.message : String(error)); });
     const onVisible = () => { if (document.visibilityState === 'visible') void refresh(); };
     window.addEventListener('focus', refresh); document.addEventListener('visibilitychange', onVisible);
-    return () => { stopped = true; window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', onVisible); };
+    return () => {
+      stopped = true; refreshActiveFile.current = null; unlistenFocus?.();
+      window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [current.id, current.nativeHandle, current.noteLocation, hasDocument]);
 
   useEffect(() => {
@@ -206,7 +216,10 @@ export default function App() {
     handle(); m.addEventListener('change', handle); return () => m.removeEventListener('change', handle);
   }, []);
   function update(id: string, fn: (doc: Document) => Document) { setState(s => ({ ...s, documents: s.documents.map(d => d.id === id ? fn(d) : d) })); }
-  function activate(id: string) { setState(s => ({ ...s, activeId: id })); setTabs(t => t.includes(id) ? t : [...t, id]); setDialog(null); }
+  function activate(id: string) {
+    if (id === latest.current.activeId) refreshActiveFile.current?.();
+    setState(s => ({ ...s, activeId: id })); setTabs(t => t.includes(id) ? t : [...t, id]); setDialog(null);
+  }
   function add(doc: Document) { setState(s => ({ ...s, documents: [...s.documents, doc], activeId: doc.id })); setTabs(t => [...t, doc.id]); setDialog(null); }
   function openNew() { if (operation.current) return; setFormName(''); setTemplate('blank'); setDialog('new'); }
   function openNewFolder() { if (operation.current) return; setFormName(''); setFolderError(''); setDialog('newFolder'); }
