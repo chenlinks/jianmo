@@ -1,8 +1,9 @@
 import { localImageName } from './image-assets.ts';
 import { blockAlignment } from './alignment.ts';
 import type { BlockAlignment } from './alignment.ts';
+import { splitFrontmatter } from './frontmatter.ts';
 export type MediaKind = 'image' | 'formula' | 'codeblock' | 'table';
-export interface MediaDraft { kind: MediaKind; value: string; label?: string; language?: string; display?: boolean; rows?: number; columns?: number; headers?: string[]; width?: number; height?: number; title?: string; alignment?: BlockAlignment }
+export interface MediaDraft { kind: MediaKind; value: string; label?: string; language?: string; frontmatter?: boolean; display?: boolean; rows?: number; columns?: number; headers?: string[]; width?: number; height?: number; title?: string; alignment?: BlockAlignment }
 export function imageDimension(value: string | null): number | undefined {
   if (!value || !/^\d+$/.test(value)) return;
   const number = Number(value); return Number.isSafeInteger(number) && number > 0 ? number : undefined;
@@ -35,6 +36,11 @@ export function mediaMarkdown(draft: MediaDraft): string {
     }
     if (/\n|(?<!\\)\$/.test(value)) throw new Error('行内公式不能包含换行或未转义的 $，可改用独立公式');
     return `$${value}$`;
+  }
+  if (draft.frontmatter) {
+    const source = `---\n${draft.value.replace(/\r?\n$/, '')}\n---\n`;
+    if (splitFrontmatter(source)?.raw !== source) throw new Error('文档属性中不能包含独立的 --- 或 ... 分隔行');
+    return source;
   }
   const language = (draft.language ?? '').trim();
   if (!/^[\w+#.-]*$/.test(language)) throw new Error('语言名称只能包含字母、数字和 + # . -');

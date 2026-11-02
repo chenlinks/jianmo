@@ -4,6 +4,8 @@ import katex from 'katex';
 import { imageDimension } from './media.ts';
 import { blockAlignment, tableStyle } from './alignment.ts';
 import { imagePreview, localImageName } from './image-assets.ts';
+import { splitFrontmatter } from './frontmatter.ts';
+import { highlightCode } from './code-highlight.ts';
 const parser = new Marked({ gfm: true, breaks: false });
 const escapeAttribute = (value: string) => value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 parser.use({ extensions: [
@@ -16,7 +18,8 @@ parser.use({ extensions: [
 ] });
 export interface Heading { id: string; title: string; level: number }
 export function renderMarkdown(source: string, imageContext = ''): { html: string; headings: Heading[] } {
-  const parsed = document.createElement('template'); parsed.innerHTML = parser.parse(source, { async: false });
+  const frontmatter = splitFrontmatter(source);
+  const parsed = document.createElement('template'); parsed.innerHTML = parser.parse(frontmatter?.body ?? source, { async: false });
   parsed.content.querySelectorAll('[data-managed-image]').forEach(el => el.removeAttribute('data-managed-image'));
   parsed.content.querySelectorAll('img').forEach(el => {
     const src = el.getAttribute('src') ?? '';
@@ -27,9 +30,20 @@ export function renderMarkdown(source: string, imageContext = ''): { html: strin
     FORBID_ATTR: ['style', 'srcset'], ALLOW_DATA_ATTR: false, ADD_ATTR: ['data-math', 'data-display', 'data-block-align', 'data-table-style', 'data-managed-image']
   });
   const template = document.createElement('template'); template.innerHTML = html;
+  // Construct metadata after sanitizing Markdown, using literal text only.
+  if (frontmatter) {
+    const panel = document.createElement('section'); panel.className = 'frontmatter-node';
+    panel.dataset.frontmatter = frontmatter.raw; panel.setAttribute('contenteditable', 'false');
+    panel.title = '双击编辑 YAML 文档属性'; panel.setAttribute('aria-label', 'YAML 文档属性');
+    const label = document.createElement('div'); label.className = 'frontmatter-label'; label.textContent = 'YAML · 文档属性';
+    const pre = document.createElement('pre'); const code = document.createElement('code');
+    code.className = 'language-yaml'; code.textContent = frontmatter.yaml.replace(/\r?\n$/, '');
+    pre.append(code); panel.append(label, pre); template.content.prepend(panel);
+  }
   template.content.querySelectorAll('pre > code').forEach(code => {
     const language = /(?:^|\s)language-([^\s]+)/.exec(code.className)?.[1]?.toLowerCase();
     const source = (code.textContent ?? '').replace(/\n$/, '');
+    highlightCode(code as HTMLElement, language);
     // Recognize unlabeled flowcharts too, as commonly pasted from chat replies.
     if (language !== 'mermaid' && (language || !/^\s*(?:flowchart|graph)\s+(?:TB|TD|BT|RL|LR)\b/.test(source))) return;
     const diagram = document.createElement('div');

@@ -13,6 +13,7 @@ import { imagePreview } from '../core/image-assets.ts';
 import { changeTable } from '../core/table.ts';
 import type { TableAction } from '../core/table.ts';
 import { replaceInDocument } from '../core/find.ts';
+import { splitFrontmatter } from '../core/frontmatter.ts';
 
 export interface LiveEditorHandle {
   format(kind: Format): void;
@@ -254,11 +255,12 @@ export default forwardRef<LiveEditorHandle, Props>(function LiveEditor({ content
     onContextMenu={e => { rememberSelection(); onContextMenu(e); }}
     onDoubleClick={e => {
       const target = e.target as Element;
-      const element = target.closest<HTMLElement>('.mermaid-node') ?? target.closest<HTMLElement>('.math-node, pre, img');
+      const element = target.closest<HTMLElement>('.frontmatter-node, .mermaid-node') ?? target.closest<HTMLElement>('.math-node, pre, img');
       if (!element || !root.current?.contains(element) || !onEditMedia) return;
       e.preventDefault(); const range = document.createRange(); range.selectNode(element);
       const current = window.getSelection(); current?.removeAllRanges(); current?.addRange(range); selection.current = range.cloneRange();
-      if (element.matches('.mermaid-node')) onEditMedia({ kind: 'codeblock', value: element.dataset.mermaid ?? '', language: 'mermaid' });
+      if (element.matches('.frontmatter-node')) onEditMedia({ kind: 'codeblock', value: splitFrontmatter(element.dataset.frontmatter ?? '')?.yaml ?? '', language: 'yaml', frontmatter: true });
+      else if (element.matches('.mermaid-node')) onEditMedia({ kind: 'codeblock', value: element.dataset.mermaid ?? '', language: 'mermaid' });
       else if (element.matches('.math-node')) onEditMedia({ kind: 'formula', value: element.dataset.math ?? '', display: element.dataset.display === 'block' });
       else if (element.matches('img')) onEditMedia({ kind: 'image', value: element.dataset.imageSource ?? element.getAttribute('src') ?? '', label: element.getAttribute('alt') ?? '', title: element.getAttribute('title') ?? '', alignment: blockAlignment(element.getAttribute('data-block-align')), width: imageDimension(element.getAttribute('width')), height: imageDimension(element.getAttribute('height')) });
       else { const code = element.querySelector('code'); onEditMedia({ kind: 'codeblock', value: (code ?? element).textContent?.replace(/\n$/, '') ?? '', language: /(?:^|\s)language-([\w+#.-]+)/.exec(code?.className ?? '')?.[1] ?? '' }); }

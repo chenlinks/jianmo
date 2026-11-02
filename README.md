@@ -39,6 +39,8 @@ Windows 中将笺墨设为 `.md`、`.markdown` 或 `.txt` 的默认打开程序�
 
 - 通过“格式”菜单插入图片、公式和代码块，双击已插入内容可重新编辑。
 - YAML / YML 代码块支持在插入 / 编辑窗口点击“格式化 YAML”，统一为 2 空格缩进并保留注释；语法错误会显示位置并保留原内容。
+- 代码块支持 JavaScript / TypeScript、Python、Java、C / C++ / C#、Go、Rust、SQL、JSON、YAML、HTML / CSS、Shell 等主流语言的离线语法高亮，保留代码原文与语言标记。
+- 文档开头的 YAML Front Matter（`--- … ---`）显示为独立文档属性区，字段和值按语法区分；可双击编辑和格式化，保存时保留 YAML 元信息结构。
 - Mermaid 代码块可离线渲染为图表；未标注语言的 `flowchart` / `graph` 代码块也会自动识别。双击图表编辑源码，保存时保留 Mermaid，导出 HTML 和打印时保留图表。
 - 支持本机 PNG、JPEG、GIF、WebP 图片，以及 HTTP/HTTPS 图片地址。
 - 图片支持像素宽高、等比缩放、25% / 50% / 75% 比例预设及恢复原始尺寸；尺寸通过 Markdown 内嵌 `img` 标签保存。
