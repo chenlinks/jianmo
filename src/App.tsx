@@ -37,7 +37,7 @@ const formats: { kind: Format; label: string; symbol: string }[] = [
   { kind: 'list', label: '无序列表', symbol: '☷' }, { kind: 'task', label: '待办事项', symbol: '☑' },
   { kind: 'link', label: '链接', symbol: '↗' }, { kind: 'code', label: '行内代码', symbol: '</>' }, { kind: 'table', label: '表格', symbol: '▦' }
 ];
-type Dialog = 'about' | 'versions' | 'settings' | 'new' | 'newFolder' | 'rename' | 'delete' | 'trash' | 'export' | 'outline' | 'library' | null;
+type Dialog = 'about' | 'versions' | 'settings' | 'new' | 'newFolder' | 'rename' | 'delete' | 'trash' | 'export' | 'outline' | 'library' | 'closeAll' | null;
 
 export default function App() {
   const [boot] = useState(() => {
@@ -223,6 +223,19 @@ export default function App() {
       return { ...state, documents, activeId: state.activeId === id ? next.at(-1) ?? documents[0].id : state.activeId };
     });
     setMedia(null); setContextMenu(null);
+  }
+  function requestCloseAll() {
+    if (!tabs.length || operation.current) return;
+    setContextMenu(null); setDialog('closeAll');
+  }
+  function closeAllTabs() {
+    setTabs([]);
+    setState(state => {
+      const documents = state.documents.filter(doc => !tabs.includes(doc.id) || !isExternalFile(doc));
+      if (!documents.length) documents.push(newDocument('未命名.md', ''));
+      return { ...state, documents, activeId: documents.some(doc => doc.id === state.activeId) ? state.activeId : documents[0].id };
+    });
+    setFindOpen(false); setMedia(null); setContextMenu(null); setDialog(null);
   }
   function syncOutline() {
     const panel = preview.current; if (!panel) return;
@@ -510,6 +523,11 @@ export default function App() {
   }
   useEffect(() => {
     function keys(e: KeyboardEvent) {
+      if (!e.isComposing && (e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'r') {
+        e.preventDefault();
+        if (!dialog && !media) requestCloseAll();
+        return;
+      }
       if (e.isComposing || dialog || media) return;
       if (e.key === 'Escape' && findOpen) { e.preventDefault(); closeFind(); return; }
       if (!(e.ctrlKey || e.metaKey)) { if (e.key === 'Escape') setFocus(false); return; }
@@ -591,6 +609,7 @@ export default function App() {
       { label: '打开文件所在位置', action: revealFileLocation, disabled: busy || !hasDocument || !isDesktop() || !(current.nativeHandle || (current.noteLocation && current.noteName)) },
       { label: '笔记存储位置', action: () => setDialog('settings') },
       { label: '关闭文档', shortcut: 'Ctrl W', disabled: !hasDocument, action: () => closeTab(current.id) },
+      { label: '关闭全部文档', shortcut: 'Ctrl R', disabled: busy || !tabs.length, action: requestCloseAll },
       { label: '另存为 Markdown', shortcut: 'Ctrl Shift S', action: () => saveFile(true), disabled: busy || !hasDocument, separator: true },
       { label: '导出与打印', disabled: !hasDocument, action: () => setDialog('export') }
     ] },
@@ -656,6 +675,7 @@ export default function App() {
     {contextMenu && <ContextMenu state={contextMenu} items={contextMenu.type === 'entry' && contextEntry ? [{ label: contextEntry.kind === 'directory' ? '打开目录' : '打开笔记', disabled: busy, action: () => void run(() => contextEntry.kind === 'directory' ? enterDirectory(contextEntry) : openNote(contextEntry)) }, { label: '重命名', shortcut: 'F2', disabled: busy, action: () => openEntryRename(contextEntry) }, { label: contextEntry.kind === 'directory' ? '删除目录' : '删除笔记', disabled: busy, action: () => openDelete({ entry: contextEntry }) }] : contextMenu.type === 'directory' ? [{ label: '新建目录', action: openNewFolder, disabled: busy }, { label: '新建笔记', action: openNew, disabled: busy }, { label: '刷新目录', separator: true, disabled: busy || !notebook.trail.length, action: () => void run(async () => notebook.setEntries(await listNotebook(notebook.trail.at(-1)!.handle))) }] : contextMenu.type === 'document' ? documentItems : [...editItems, ...formatItems.map((item, i) => ({ ...item, separator: i === 0 })), ...mediaItems]} close={() => setContextMenu(null)} />}
     {notice && <div className="toast" role="status"><span>{notice}</span><button className="icon-button" aria-label="关闭提示" onClick={() => setNotice('')}><Icon name="close" /></button></div>}
     {media && <InsertMedia initial={media} imageContext={imageContext} onImage={storeImage} onClose={() => setMedia(null)} onInsert={insertMedia} />}
+    {dialog === 'closeAll' && <Modal title="关闭全部文档" onClose={() => setDialog(null)}><p>确定关闭全部 {tabs.length} 个文档标签吗？</p><p className="hint">笔记草稿会保留。外部文件中未保存的修改将丢失，请先保存。</p><div className="dialog-actions"><button autoFocus onClick={() => setDialog(null)}>取消</button><button className="primary" onClick={closeAllTabs}>确认关闭</button></div></Modal>}
     {dialog === 'delete' && deleteTarget && <Modal title={'entry' in deleteTarget && deleteTarget.entry.kind === 'directory' ? '删除目录' : '删除笔记'} onClose={() => { if (!busy) setDialog(null); }}><p>将“{'entry' in deleteTarget ? deleteTarget.entry.name : state.documents.find(doc => doc.id === deleteTarget.docId)?.name}”移入回收站？</p><p className="hint">{'entry' in deleteTarget && deleteTarget.entry.kind === 'directory' ? '目录中的所有子目录和文件会一起移入回收站。' : ''}未保存的草稿会保留，可在当前目录的“工具 → 回收站”中恢复。</p>{deleteError && <p role="alert" className="status-error">{deleteError}</p>}<div className="dialog-actions"><button disabled={busy} onClick={() => setDialog(null)}>取消</button><button disabled={busy} className="primary" onClick={commitDelete}>移入回收站</button></div></Modal>}
     {dialog === 'trash' && <Modal title="回收站" onClose={() => setDialog(null)}><p className="hint">当前目录中已删除的笔记和文件夹。恢复时会保留原来的层级和草稿。</p>{notebook.entries.filter(entry => originalTrashName(entry.name)).map(entry => <div className="trash-row" key={entry.handle}><span>{originalTrashName(entry.name)}</span><button disabled={busy} aria-label={`恢复 ${originalTrashName(entry.name)}`} onClick={() => restoreTrash(entry)}>恢复</button></div>)}{state.documents.filter(doc => doc.trash && JSON.stringify(doc.trash.parent) === directoryKey && doc.trash.location === notebook.trail[0]?.locationId && !notebook.entries.some(entry => entry.name === doc.trash!.name)).filter((doc, index, all) => all.findIndex(other => other.trash!.name === doc.trash!.name) === index).map(doc => <div className="trash-row" key={doc.id}><span>{originalTrashName(doc.trash!.name)} · 草稿</span><button disabled={busy} onClick={() => restoreTrash(undefined, doc.trash!.name)}>恢复</button></div>)}{!notebook.entries.some(entry => originalTrashName(entry.name)) && !state.documents.some(doc => doc.trash && JSON.stringify(doc.trash.parent) === directoryKey && doc.trash.location === notebook.trail[0]?.locationId) && <p className="empty-library">回收站为空</p>}</Modal>}
     {dialog === 'rename' && <Modal title={renameTarget && 'entry' in renameTarget && renameTarget.entry.kind === 'directory' ? '重命名目录' : '重命名笔记'} onClose={() => { if (!busy) setDialog(null); }}><form onSubmit={e => { e.preventDefault(); commitRename(); }}><label htmlFor="doc-name">新名称</label><input id="doc-name" autoFocus required maxLength={100} value={formName} onChange={e => setFormName(e.target.value)} disabled={busy} />{renameError && <p role="alert" className="status-error">{renameError}</p>}<div className="dialog-actions"><button type="button" disabled={busy} onClick={() => setDialog(null)}>取消</button><button type="submit" disabled={busy} className="primary">保存名称</button></div></form></Modal>}

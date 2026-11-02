@@ -7,6 +7,8 @@ import { STORAGE_KEY, parseWorkspace } from '../src/core/documents.ts';
 test('external files read fresh disk content without draft caching and preserve pending edits', async () => {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: 'http://localhost', pretendToBeVisual: true });
   const win = dom.window;
+  win.HTMLDialogElement.prototype.showModal = function() { this.open = true; };
+  win.HTMLDialogElement.prototype.close = function() { this.open = false; };
   for (const [key, value] of Object.entries({ window: win, navigator: win.navigator, document: win.document, localStorage: win.localStorage, Node: win.Node, NodeFilter: win.NodeFilter, HTMLInputElement: win.HTMLInputElement, HTMLElement: win.HTMLElement, HTMLTextAreaElement: win.HTMLTextAreaElement, requestAnimationFrame: (cb: FrameRequestCallback) => setTimeout(cb, 0), cancelAnimationFrame: (id: number) => clearTimeout(id), IS_REACT_ACT_ENVIRONMENT: true,
     matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }) })) Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
   const file = { handle: 'os-file', path: 'C:\\文档\\中文 文件.md', name: '中文 文件.md', content: '# 双击打开' };
@@ -120,6 +122,17 @@ test('external files read fresh disk content without draft caching and preserve 
     await act(async () => win.document.querySelector<HTMLButtonElement>(`[aria-label="关闭标签 ${file.name}"]`)!.click());
     assert.equal(listed(file.name), false, 'closing an inactive external tab also removes its directory entry');
     assert.ok(listed(other.name));
+    await edit('关闭全部前的未保存修改');
+    await act(async () => win.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'r', ctrlKey: true, cancelable: true })));
+    assert.match(win.document.querySelector('dialog[open]')!.textContent!, /未保存的修改将丢失/);
+    await act(async () => [...win.document.querySelectorAll<HTMLButtonElement>('dialog button')].find(button => button.textContent === '取消')!.click());
+    assert.equal(heading(), '关闭全部前的未保存修改'); assert.ok(listed(other.name));
+    await deliver([{ status: 'opened', value: { ...file } }]);
+    await act(async () => win.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'R', metaKey: true, cancelable: true })));
+    await act(async () => [...win.document.querySelectorAll<HTMLButtonElement>('dialog button')].find(button => button.textContent === '确认关闭')!.click());
+    assert.ok(win.document.querySelector('.welcome-page')); assert.equal(win.document.querySelector('.tabs'), null);
+    assert.equal(listed(file.name), false); assert.equal(listed(other.name), false);
+    assert.equal(other.content, '# 第二篇', 'closing all does not overwrite files with unsaved edits');
     await act(async () => root.unmount());
     root = createRoot(win.document.getElementById('root')!);
     await act(async () => root.render(React.createElement(React.StrictMode, null, React.createElement(App))));
