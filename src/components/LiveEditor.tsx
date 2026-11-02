@@ -12,12 +12,14 @@ import { changeListLevel } from '../core/lists.ts';
 import { imagePreview } from '../core/image-assets.ts';
 import { changeTable } from '../core/table.ts';
 import type { TableAction } from '../core/table.ts';
+import { replaceInDocument } from '../core/find.ts';
 
 export interface LiveEditorHandle {
   format(kind: Format): void;
   paragraph(action: ParagraphAction): void;
   command(command: 'undo' | 'redo' | 'selectAll' | 'cut' | 'copy' | 'paste'): Promise<void>;
   insertMarkdown(markdown: string): void;
+  replace(query: string, replacement: string, caseSensitive: boolean, index?: number): number;
 }
 interface Props { content: string; imageContext?: string; imageVersion?: number; spellcheck: boolean; onChange(content: string): void; onContextMenu(event: React.MouseEvent): void; onHeadingChange?(level: number): void; onEditMedia?(draft: MediaDraft): void }
 interface Snapshot { html: string; markdown: string; caret: number }
@@ -97,11 +99,11 @@ export default forwardRef<LiveEditorHandle, Props>(function LiveEditor({ content
     const el = root.current!; el.innerHTML = renderMarkdown(content, imageContext).html || '<p><br></p>'; prepare();
     emitted.current = content; history.current = [{ html: el.innerHTML, markdown: content, caret: 0 }]; position.current = 0; selection.current = null;
   }, [content, imageContext, imageVersion]);
-  function publish() {
+  function publish(formatInline = true) {
     if (composing.current || formatting.current || !root.current) return;
     const selected = window.getSelection();
     const textNode = selected?.anchorNode;
-    if (selected?.isCollapsed && textNode?.nodeType === Node.TEXT_NODE && !textNode.parentElement?.closest('pre,code,a')) {
+    if (formatInline && selected?.isCollapsed && textNode?.nodeType === Node.TEXT_NODE && !textNode.parentElement?.closest('pre,code,a')) {
       const before = textNode.textContent?.slice(0, selected.anchorOffset) ?? '';
       const match = /(\*\*[^*\n]+\*\*|(?<!\*)\*[^*\n]+\*|`[^`\n]+`|~~[^~\n]+~~|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\))$/.exec(before);
       if (match) {
@@ -195,6 +197,12 @@ export default forwardRef<LiveEditorHandle, Props>(function LiveEditor({ content
       } else if (kind === 'link') insertMarkdown('[链接文字](https://example.com)');
     },
     insertMarkdown,
+    replace(query, replacement, caseSensitive, index) {
+      if (!root.current || composing.current) return 0;
+      const count = replaceInDocument(root.current, query, replacement, caseSensitive, index);
+      if (count) publish(false);
+      return count;
+    },
     async command(command) {
       if (command === 'undo') { undo(-1); return; } if (command === 'redo') { undo(1); return; }
       restoreSelection();
@@ -241,7 +249,7 @@ export default forwardRef<LiveEditorHandle, Props>(function LiveEditor({ content
   return <>{imageActive && <div className="table-tools"><div className="table-actions" role="toolbar" aria-label="图片工具">{alignmentButtons('图片')}<button type="button" onMouseDown={e => e.preventDefault()} onClick={resizeImage}>调整图片大小</button><button type="button" onMouseDown={e => e.preventDefault()} onClick={() => { const image = selectedImage.current; if (image && root.current?.contains(image)) { image.removeAttribute('width'); image.removeAttribute('height'); publish(); } }}>恢复原始尺寸</button></div></div>}{tableActive && !imageActive && <div className="table-tools"><div className="table-actions" role="toolbar" aria-label="表格行列工具">{alignmentButtons('表格')}<select aria-label="表格样式" value={tableStyle(tableCell.current?.closest('table')?.getAttribute('data-table-style')) ?? 'simple'} onChange={event => { const table = tableCell.current?.closest('table'); const style = tableStyle(event.target.value); if (table && style && root.current?.contains(table)) { table.setAttribute('data-table-style', style); publish(); refreshMediaTools(value => value + 1); } }}><option value="simple">简洁</option><option value="grid">网格</option><option value="striped">条纹</option></select>{([
     ['rowAbove', '上方加行'], ['rowBelow', '下方加行'], ['columnLeft', '左侧加列'], ['columnRight', '右侧加列'], ['deleteRow', '删除当前行'], ['deleteColumn', '删除当前列']
   ] as [TableAction, string][]).map(([action, label]) => <button key={action} type="button" onMouseDown={e => e.preventDefault()} onClick={() => tableAction(action)}>{label}</button>)}</div></div>}<article ref={root} className="paper markdown-body live-editor" contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" aria-label="文稿编辑器" spellCheck={spellcheck}
-    onInput={publish} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; publish(); }}
+    onInput={() => publish()} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; publish(); }}
     onKeyDown={shortcut} onKeyUp={rememberSelection} onMouseUp={rememberSelection} onBlur={rememberSelection}
     onContextMenu={e => { rememberSelection(); onContextMenu(e); }}
     onDoubleClick={e => {

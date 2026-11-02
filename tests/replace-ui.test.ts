@@ -1,0 +1,78 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { JSDOM } from 'jsdom';
+import React, { act } from 'react';
+import { initialWorkspace, newDocument, STORAGE_KEY } from '../src/core/documents.ts';
+
+test('replace supports shortcuts, selected matches, literal text, deletion, undo and source editing in the active tab', async () => {
+  const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: 'http://localhost', pretendToBeVisual: true });
+  const win = dom.window;
+  for (const [key, value] of Object.entries({ window: win, navigator: win.navigator, document: win.document, localStorage: win.localStorage, Node: win.Node, NodeFilter: win.NodeFilter, HTMLInputElement: win.HTMLInputElement, HTMLElement: win.HTMLElement, HTMLTextAreaElement: win.HTMLTextAreaElement, requestAnimationFrame: (callback: FrameRequestCallback) => setTimeout(callback, 0), cancelAnimationFrame: (id: number) => clearTimeout(id), IS_REACT_ACT_ENVIRONMENT: true, matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }) })) Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
+  const first = newDocument('Alpha.md', '# Alpha\n\nTest **test** test\n\n[Keep](https://test.example)\n');
+  const second = newDocument('Other.md', '# Other\n\nTest test\n');
+  win.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...initialWorkspace(), documents: [first, second], activeId: first.id, openTabs: [first.id, second.id] }));
+  const { createRoot } = await import('react-dom/client');
+  const { default: App } = await import('../src/App.tsx');
+  const root = createRoot(win.document.getElementById('root')!);
+  const key = async (key: string, ctrlKey = false, target: EventTarget = win, extra = {}) => { await act(async () => target.dispatchEvent(new win.KeyboardEvent('keydown', { key, ctrlKey, bubbles: true, cancelable: true, ...extra }))); };
+  const field = (label: string) => win.document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
+  const button = (label: string) => [...win.document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.getAttribute('aria-label') === label || button.textContent === label || button.querySelector('span:not(.menu-check)')?.textContent === label)!;
+  const click = async (label: string) => { assert.ok(button(label), label); await act(async () => button(label).click()); };
+  const count = () => win.document.querySelector('.find-count')!.textContent;
+  const content = () => JSON.parse(win.localStorage.getItem(STORAGE_KEY)!).documents[0].content as string;
+  const paper = () => win.document.querySelector<HTMLElement>('.live-editor')!;
+  const change = async (label: string, value: string) => { await act(async () => {
+    Object.getOwnPropertyDescriptor(win.HTMLInputElement.prototype, 'value')!.set!.call(field(label), value);
+    field(label).dispatchEvent(new win.Event('input', { bubbles: true }));
+  }); };
+  const undo = async () => { await click('编辑'); await click('撤销'); };
+  try {
+    await act(async () => root.render(React.createElement(App)));
+    await key('h', true); assert.ok(field('替换为')); assert.equal(win.document.activeElement, field('查找内容'));
+    await change('查找内容', 'test'); assert.equal(count(), '1 / 3');
+    await change('替换为', 'test!');
+    await click('下一个匹配'); await click('替换');
+    assert.equal(paper().querySelector('strong')!.textContent, 'test!');
+    assert.equal(count(), '3 / 3', 'continue after the replaced text, even if it contains the query');
+    await key('Enter', false, field('替换为'), { isComposing: true });
+    assert.match(content(), /test!\*\* test/);
+    await key('Enter', false, field('替换为'));
+    assert.match(content(), /test!\*\* test!/); assert.equal(count(), '1 / 3');
+    const beforeAll = content();
+    await change('替换为', '<b>$&</b>'); await click('全部替换');
+    assert.equal(count(), '无匹配结果'); assert.equal(button('替换').disabled, true);
+    assert.equal(paper().querySelector('b'), null, 'replacement text is not interpreted as HTML');
+    assert.equal(paper().querySelector('strong')!.textContent, '<b>$&</b>!');
+    assert.equal(paper().querySelector('a')!.getAttribute('href'), 'https://test.example');
+    assert.equal(win.document.querySelector('.replace-status')!.textContent, '已替换 3 处');
+    await undo(); assert.equal(content(), beforeAll, 'replace all is a single undo step');
+    await click('编辑'); await click('重做'); assert.equal(paper().querySelector('strong')!.textContent, '<b>$&</b>!');
+    await undo();
+    await click('区分大小写'); assert.equal(count(), '1 / 2');
+    await change('替换为', ''); await click('全部替换');
+    assert.equal(paper().querySelector('strong')!.textContent, '!');
+    assert.match(paper().textContent!, /Test/); await undo();
+    await key('e', true); assert.equal(count(), '1 / 3', 'source mode also searches link destinations');
+    await change('查找内容', 'https://test.example'); await change('替换为', 'https://changed.example');
+    await click('全部替换'); assert.match(content(), /https:\/\/changed.example/);
+    assert.equal(count(), '无匹配结果');
+    await change('查找内容', 'test'); await change('替换为', '$&');
+    let nativeEdits = 0;
+    Object.defineProperty(win.document, 'execCommand', { configurable: true, value: (command: string, _ui: boolean, value: string) => {
+      assert.equal(command, 'insertText'); nativeEdits++;
+      const textarea = win.document.querySelector('textarea')!;
+      const text = textarea.value.slice(0, textarea.selectionStart) + value + textarea.value.slice(textarea.selectionEnd);
+      Object.getOwnPropertyDescriptor(win.HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, text);
+      textarea.dispatchEvent(new win.Event('input', { bubbles: true })); return true;
+    } });
+    await act(async () => field('替换为').focus()); await click('全部替换');
+    assert.equal(nativeEdits, 1, 'source replace all uses one native edit for undo');
+    assert.equal(win.document.activeElement, field('替换为'));
+    assert.match(content(), /\*\*\$&!\*\* \$&!/);
+    assert.ok(win.document.querySelector('.dirty-dot'));
+    assert.equal(JSON.parse(win.localStorage.getItem(STORAGE_KEY)!).documents[1].content, second.content);
+    await key('Escape', false, field('替换为')); assert.equal(field('替换为'), null);
+    await click('编辑'); await click('替换'); assert.ok(field('替换为'));
+    await click('展开替换'); assert.equal(field('替换为'), null); assert.ok(field('查找内容'));
+  } finally { await act(async () => root.unmount()); dom.window.close(); }
+});

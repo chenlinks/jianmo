@@ -9,6 +9,7 @@ import type { ParagraphAction } from './core/paragraph.ts';
 import { cacheImagePreview, imagePreview } from './core/image-assets.ts';
 import { listKey } from './core/lists.ts';
 import { renderMarkdown } from './core/markdown.ts';
+import { findText, replaceText } from './core/find.ts';
 import { download, isDesktop, openNativeFile, readNativeFile, readBrowserFile, revealNativeFile, saveNativeFile, watchNativeFiles } from './platform/files.ts';
 import Icon from './components/Icon.tsx';
 import Logo from './components/Logo.tsx';
@@ -67,6 +68,7 @@ export default function App() {
   const editor = useRef<HTMLTextAreaElement>(null); const importer = useRef<HTMLInputElement>(null);
   const preview = useRef<HTMLElement>(null);
   const [findOpen, setFindOpen] = useState(false);
+  const [replaceOpen, setReplaceOpen] = useState(false);
   const [findRequest, setFindRequest] = useState(0);
   const [findInitial, setFindInitial] = useState('');
   const [activeHeading, setActiveHeading] = useState('');
@@ -75,15 +77,34 @@ export default function App() {
   const refreshActiveFile = useRef<(() => void) | null>(null);
   const current = state.documents.find(d => d.id === state.activeId)!;
   const hasDocument = tabs.includes(current.id) && !current.trash;
-  function openFind() {
+  function openFind(replace = false) {
     if (!hasDocument) return;
     const selected = view === 'edit' && editor.current ? editor.current.value.slice(editor.current.selectionStart, editor.current.selectionEnd) : window.getSelection()?.toString() ?? '';
     if (!findOpen) setFindInitial(selected.includes('\n') ? '' : selected);
-    setFindOpen(true); setFindRequest(value => value + 1);
+    setReplaceOpen(replace); setFindOpen(true); setFindRequest(value => value + 1);
   }
   function closeFind() {
     setFindOpen(false);
     if (view === 'edit') editor.current?.focus(); else preview.current?.querySelector<HTMLElement>('.live-editor')?.focus();
+  }
+  function replaceMatches(query: string, replacement: string, caseSensitive: boolean, index?: number): number {
+    if (view !== 'edit') return richEditor.current?.replace(query, replacement, caseSensitive, index) ?? 0;
+    const el = editor.current; if (!el) return 0;
+    const results = findText(el.value, query, caseSensitive);
+    const matches = index === undefined ? results : results.slice(index, index + 1);
+    if (!matches.length) return 0;
+    const content = replaceText(el.value, matches, replacement);
+    if (content === el.value) return matches.length;
+    const focused = document.activeElement as HTMLElement | null;
+    const start = matches[0].start; const end = matches.at(-1)!.end;
+    const inserted = content.slice(start, content.length - (el.value.length - end));
+    // One native edit keeps a replace-all operation in the textarea's undo stack.
+    el.focus(); el.setSelectionRange(start, end);
+    if (typeof document.execCommand === 'function') document.execCommand('insertText', false, inserted);
+    update(current.id, doc => edited(doc, content));
+    sourceSelection.current = { start: start + inserted.length, end: start + inserted.length };
+    focused?.focus();
+    return matches.length;
   }
   const [imageVersion, setImageVersion] = useState(0);
   const imageContext = current.id + ':' + JSON.stringify([current.noteLocation, current.noteDirectory]);
@@ -498,6 +519,7 @@ export default function App() {
       }
       switch (e.key.toLowerCase()) {
         case 'f': e.preventDefault(); openFind(); break;
+        case 'h': e.preventDefault(); openFind(true); break;
         case 's': e.preventDefault(); if (hasDocument) saveFile(e.shiftKey); break;
         case 'w': e.preventDefault(); if (hasDocument) closeTab(current.id); break;
         case 'o': e.preventDefault(); openFile(); break;
@@ -547,7 +569,8 @@ export default function App() {
     { label: '复制', shortcut: 'Ctrl C', action: () => editCommand('copy') },
     { label: '粘贴', shortcut: 'Ctrl V', action: () => editCommand('paste') },
     { label: '全选', shortcut: 'Ctrl A', action: () => editCommand('selectAll') },
-    { label: '查找', shortcut: 'Ctrl F', separator: true, action: openFind }
+    { label: '查找', shortcut: 'Ctrl F', separator: true, action: () => openFind() },
+    { label: '替换', shortcut: 'Ctrl H', action: () => openFind(true) }
   ];
   const formatItems: MenuItem[] = formats.map(f => ({ label: f.label, action: () => format(f.kind), shortcut: f.kind === 'bold' ? 'Ctrl B' : f.kind === 'italic' ? 'Ctrl I' : undefined }));
   const mediaItems: MenuItem[] = [
@@ -613,7 +636,7 @@ export default function App() {
       <header className="topbar"><button className="icon-button library-toggle" aria-label="打开文档库" onClick={() => setDialog('library')}><Icon name="menu" /></button><div className="breadcrumb">{hasDocument ? <><span>我的文档</span><span>/</span><button onClick={() => openRename()}>{current.name}</button></> : <span>笺墨</span>}</div><span className="editing-status">{!hasDocument ? '欢迎回来' : view === 'edit' ? '源码模式' : '即写即阅'}</span></header>
       {hasDocument && <div className="tabs" aria-label="已打开文档">{tabs.map(id => { const d = state.documents.find(item => item.id === id); return d && <div className={`tab ${id === current.id ? 'active' : ''}`} key={id}><button aria-current={id === current.id ? 'page' : undefined} onClick={() => activate(id)}><Icon name="file" />{d.name}{isDirty(d) && <span aria-label="尚未保存到文件" className="dirty-dot" />}</button>{<button className="icon-button" aria-label={`关闭标签 ${d.name}`} onClick={() => closeTab(id)}><Icon name="close" /></button>}</div>; })}</div>}
       {cacheError && <div className="error-banner" role="alert">{cacheError}</div>}
-      {hasDocument && findOpen && <FindBar documentId={current.id} content={current.content} sourceMode={view === 'edit'} focusRequest={findRequest} initialQuery={findInitial} getTarget={() => view === 'edit' ? editor.current : preview.current?.querySelector<HTMLElement>('.live-editor') ?? null} onClose={closeFind} />}
+      {hasDocument && findOpen && <FindBar documentId={current.id} content={current.content} sourceMode={view === 'edit'} focusRequest={findRequest} initialQuery={findInitial} replaceOpen={replaceOpen} onToggleReplace={() => setReplaceOpen(value => !value)} onReplace={replaceMatches} getTarget={() => view === 'edit' ? editor.current : preview.current?.querySelector<HTMLElement>('.live-editor') ?? null} onClose={closeFind} />}
       {!hasDocument ? <section className="welcome-page" id="document-content" tabIndex={-1} aria-label="笺墨欢迎页"><div className="welcome-content"><div className="welcome-hero"><div className="welcome-brand"><Logo /><p className="welcome-name">笺墨 · JIANMO</p></div><div className="welcome-copy"><h1>一页空白<br />容得下每一种想法</h1><p className="welcome-description">专注书写，自然成文。<br />让灵感、记录与思考，在这里慢慢生长。</p></div></div><div className="welcome-footer"><div className="welcome-features"><span>即写即阅</span><span>本机存储</span><span>自由表达</span></div><p className="welcome-hint">打开一篇笔记，或从目录中开始书写。</p></div></div></section> : <><div className={`writing-area mode-${view}`} id="document-content" tabIndex={-1}>
         {view !== 'read' && <section className="source-panel" aria-label="Markdown 源码"><div className="pane-caption">MARKDOWN<span>{current.content.split('\n').length} 行</span></div><textarea key={current.id} ref={editor} aria-label="Markdown 编辑器" spellCheck={state.spellcheck ?? false} onSelect={e => { sourceSelection.current = { start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd }; setHeadingLevel(sourceHeadingLevel(current.content, e.currentTarget.selectionStart)); }} onContextMenu={e => context(e, 'editor')} value={current.content} onChange={e => update(current.id, d => edited(d, e.target.value))} onKeyDown={e => {
           if (e.nativeEvent.isComposing || !['Tab', 'Enter'].includes(e.key)) return;
