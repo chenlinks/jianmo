@@ -1,5 +1,6 @@
 import { forwardRef, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import { renderMarkdown } from '../core/markdown.ts';
+import { renderDiagrams } from '../core/mermaid.ts';
 import { richTextToMarkdown } from '../core/rich-text.ts';
 import type { Format } from '../core/format.ts';
 import type { ParagraphAction } from '../core/paragraph.ts';
@@ -85,6 +86,7 @@ export default forwardRef<LiveEditorHandle, Props>(function LiveEditor({ content
     else placeCaret(root.current?.textContent?.length ?? 0);
   }
   function prepare() {
+    if (root.current) void renderDiagrams(root.current);
     root.current?.querySelectorAll('td,th').forEach(cell => { if (!cell.hasChildNodes()) cell.append(document.createElement('br')); });
     root.current?.querySelectorAll('input[type=checkbox]').forEach(input => { input.removeAttribute('disabled'); input.setAttribute('contenteditable', 'false'); input.setAttribute('aria-label', '完成待办'); });
     root.current?.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach((el, i) => { el.id = `heading-${i}`; });
@@ -127,7 +129,7 @@ export default forwardRef<LiveEditorHandle, Props>(function LiveEditor({ content
   function insertMarkdown(markdown: string) { execute('insertHTML', renderMarkdown(markdown, imageContext).html); }
   function undo(direction: number) {
     const next = position.current + direction; const snapshot = history.current[next]; if (!snapshot) return;
-    position.current = next; root.current!.innerHTML = snapshot.html; emitted.current = snapshot.markdown; onChange(snapshot.markdown); root.current!.focus(); placeCaret(snapshot.caret);
+    position.current = next; root.current!.innerHTML = snapshot.html; prepare(); emitted.current = snapshot.markdown; onChange(snapshot.markdown); root.current!.focus(); placeCaret(snapshot.caret);
   }
   function paragraph(action: ParagraphAction) {
     restoreSelection(); const current = window.getSelection();
@@ -243,11 +245,13 @@ export default forwardRef<LiveEditorHandle, Props>(function LiveEditor({ content
     onKeyDown={shortcut} onKeyUp={rememberSelection} onMouseUp={rememberSelection} onBlur={rememberSelection}
     onContextMenu={e => { rememberSelection(); onContextMenu(e); }}
     onDoubleClick={e => {
-      const element = (e.target as Element).closest<HTMLElement>('.math-node, pre, img');
+      const target = e.target as Element;
+      const element = target.closest<HTMLElement>('.mermaid-node') ?? target.closest<HTMLElement>('.math-node, pre, img');
       if (!element || !root.current?.contains(element) || !onEditMedia) return;
       e.preventDefault(); const range = document.createRange(); range.selectNode(element);
       const current = window.getSelection(); current?.removeAllRanges(); current?.addRange(range); selection.current = range.cloneRange();
-      if (element.matches('.math-node')) onEditMedia({ kind: 'formula', value: element.dataset.math ?? '', display: element.dataset.display === 'block' });
+      if (element.matches('.mermaid-node')) onEditMedia({ kind: 'codeblock', value: element.dataset.mermaid ?? '', language: 'mermaid' });
+      else if (element.matches('.math-node')) onEditMedia({ kind: 'formula', value: element.dataset.math ?? '', display: element.dataset.display === 'block' });
       else if (element.matches('img')) onEditMedia({ kind: 'image', value: element.dataset.imageSource ?? element.getAttribute('src') ?? '', label: element.getAttribute('alt') ?? '', title: element.getAttribute('title') ?? '', alignment: blockAlignment(element.getAttribute('data-block-align')), width: imageDimension(element.getAttribute('width')), height: imageDimension(element.getAttribute('height')) });
       else { const code = element.querySelector('code'); onEditMedia({ kind: 'codeblock', value: (code ?? element).textContent?.replace(/\n$/, '') ?? '', language: /(?:^|\s)language-([\w+#.-]+)/.exec(code?.className ?? '')?.[1] ?? '' }); }
     }}

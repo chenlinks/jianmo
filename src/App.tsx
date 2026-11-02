@@ -24,6 +24,8 @@ import type { ContextMenuState, MenuGroup, MenuItem } from './components/AppMenu
 import Modal from './components/Modal.tsx';
 import DocumentOutline from './components/DocumentOutline.tsx';
 import InsertMedia from './components/InsertMedia.tsx';
+import FindBar from './components/FindBar.tsx';
+import { renderDiagrams } from './core/mermaid.ts';
 import type { MediaDraft, MediaKind } from './core/media.ts';
 import tokenCss from './styles/tokens.css?raw';
 import articleCss from './styles/article.css?raw';
@@ -64,12 +66,25 @@ export default function App() {
   const [media, setMedia] = useState<MediaDraft | null>(null);
   const editor = useRef<HTMLTextAreaElement>(null); const importer = useRef<HTMLInputElement>(null);
   const preview = useRef<HTMLElement>(null);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findRequest, setFindRequest] = useState(0);
+  const [findInitial, setFindInitial] = useState('');
   const [activeHeading, setActiveHeading] = useState('');
   const latest = useRef(state); latest.current = state;
   const externalPaths = useRef<string[]>([]);
   const refreshActiveFile = useRef<(() => void) | null>(null);
   const current = state.documents.find(d => d.id === state.activeId)!;
   const hasDocument = tabs.includes(current.id) && !current.trash;
+  function openFind() {
+    if (!hasDocument) return;
+    const selected = view === 'edit' && editor.current ? editor.current.value.slice(editor.current.selectionStart, editor.current.selectionEnd) : window.getSelection()?.toString() ?? '';
+    if (!findOpen) setFindInitial(selected.includes('\n') ? '' : selected);
+    setFindOpen(true); setFindRequest(value => value + 1);
+  }
+  function closeFind() {
+    setFindOpen(false);
+    if (view === 'edit') editor.current?.focus(); else preview.current?.querySelector<HTMLElement>('.live-editor')?.focus();
+  }
   const [imageVersion, setImageVersion] = useState(0);
   const imageContext = current.id + ':' + JSON.stringify([current.noteLocation, current.noteDirectory]);
   const deferredContent = useDeferredValue(current.content);
@@ -475,12 +490,14 @@ export default function App() {
   useEffect(() => {
     function keys(e: KeyboardEvent) {
       if (e.isComposing || dialog || media) return;
+      if (e.key === 'Escape' && findOpen) { e.preventDefault(); closeFind(); return; }
       if (!(e.ctrlKey || e.metaKey)) { if (e.key === 'Escape') setFocus(false); return; }
       if (document.activeElement === editor.current || (document.activeElement as HTMLElement)?.isContentEditable) {
         const action = paragraphShortcut(e);
         if (action) { e.preventDefault(); paragraph(action); return; }
       }
       switch (e.key.toLowerCase()) {
+        case 'f': e.preventDefault(); openFind(); break;
         case 's': e.preventDefault(); if (hasDocument) saveFile(e.shiftKey); break;
         case 'w': e.preventDefault(); if (hasDocument) closeTab(current.id); break;
         case 'o': e.preventDefault(); openFile(); break;
@@ -509,13 +526,28 @@ export default function App() {
       } catch { setNotice('浏览器未允许剪贴板访问，请使用 Ctrl/⌘ C、X、V'); }
     })();
   }
+  async function exportHtml() {
+    const article = document.createElement('article'); article.innerHTML = renderMarkdown(current.content, imageContext).html;
+    const name = current.name; const theme = state.theme;
+    await renderDiagrams(article);
+    const safeTitle = name.replace(/[&<>"']/g, '');
+    download(`<!doctype html><html lang="zh-CN" data-theme="${theme}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${safeTitle}</title><style>${tokenCss}\n${articleCss}\nbody{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-ui)}article{max-width:736px;margin:auto;padding:48px 24px}</style></head><body><article class="markdown-body">${article.innerHTML}</article></body></html>`, name.replace(/\.[^.]+$/, '') + '.html', 'text/html;charset=utf-8');
+    setNotice('已发起 HTML 下载'); setDialog(null);
+  }
+  async function printDocument() {
+    setDialog(null); setView('read');
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    if (preview.current) await renderDiagrams(preview.current);
+    window.print();
+  }
   const editItems: MenuItem[] = [
     { label: '撤销', shortcut: 'Ctrl Z', action: () => editCommand('undo') },
     { label: '重做', shortcut: 'Ctrl Shift Z', action: () => editCommand('redo') },
     { label: '剪切', shortcut: 'Ctrl X', separator: true, action: () => editCommand('cut') },
     { label: '复制', shortcut: 'Ctrl C', action: () => editCommand('copy') },
     { label: '粘贴', shortcut: 'Ctrl V', action: () => editCommand('paste') },
-    { label: '全选', shortcut: 'Ctrl A', action: () => editCommand('selectAll') }
+    { label: '全选', shortcut: 'Ctrl A', action: () => editCommand('selectAll') },
+    { label: '查找', shortcut: 'Ctrl F', separator: true, action: openFind }
   ];
   const formatItems: MenuItem[] = formats.map(f => ({ label: f.label, action: () => format(f.kind), shortcut: f.kind === 'bold' ? 'Ctrl B' : f.kind === 'italic' ? 'Ctrl I' : undefined }));
   const mediaItems: MenuItem[] = [
@@ -581,6 +613,7 @@ export default function App() {
       <header className="topbar"><button className="icon-button library-toggle" aria-label="打开文档库" onClick={() => setDialog('library')}><Icon name="menu" /></button><div className="breadcrumb">{hasDocument ? <><span>我的文档</span><span>/</span><button onClick={() => openRename()}>{current.name}</button></> : <span>笺墨</span>}</div><span className="editing-status">{!hasDocument ? '欢迎回来' : view === 'edit' ? '源码模式' : '即写即阅'}</span></header>
       {hasDocument && <div className="tabs" aria-label="已打开文档">{tabs.map(id => { const d = state.documents.find(item => item.id === id); return d && <div className={`tab ${id === current.id ? 'active' : ''}`} key={id}><button aria-current={id === current.id ? 'page' : undefined} onClick={() => activate(id)}><Icon name="file" />{d.name}{isDirty(d) && <span aria-label="尚未保存到文件" className="dirty-dot" />}</button>{<button className="icon-button" aria-label={`关闭标签 ${d.name}`} onClick={() => closeTab(id)}><Icon name="close" /></button>}</div>; })}</div>}
       {cacheError && <div className="error-banner" role="alert">{cacheError}</div>}
+      {hasDocument && findOpen && <FindBar documentId={current.id} content={current.content} sourceMode={view === 'edit'} focusRequest={findRequest} initialQuery={findInitial} getTarget={() => view === 'edit' ? editor.current : preview.current?.querySelector<HTMLElement>('.live-editor') ?? null} onClose={closeFind} />}
       {!hasDocument ? <section className="welcome-page" id="document-content" tabIndex={-1} aria-label="笺墨欢迎页"><div className="welcome-content"><div className="welcome-hero"><div className="welcome-brand"><Logo /><p className="welcome-name">笺墨 · JIANMO</p></div><div className="welcome-copy"><h1>一页空白<br />容得下每一种想法</h1><p className="welcome-description">专注书写，自然成文。<br />让灵感、记录与思考，在这里慢慢生长。</p></div></div><div className="welcome-footer"><div className="welcome-features"><span>即写即阅</span><span>本机存储</span><span>自由表达</span></div><p className="welcome-hint">打开一篇笔记，或从目录中开始书写。</p></div></div></section> : <><div className={`writing-area mode-${view}`} id="document-content" tabIndex={-1}>
         {view !== 'read' && <section className="source-panel" aria-label="Markdown 源码"><div className="pane-caption">MARKDOWN<span>{current.content.split('\n').length} 行</span></div><textarea key={current.id} ref={editor} aria-label="Markdown 编辑器" spellCheck={state.spellcheck ?? false} onSelect={e => { sourceSelection.current = { start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd }; setHeadingLevel(sourceHeadingLevel(current.content, e.currentTarget.selectionStart)); }} onContextMenu={e => context(e, 'editor')} value={current.content} onChange={e => update(current.id, d => edited(d, e.target.value))} onKeyDown={e => {
           if (e.nativeEvent.isComposing || !['Tab', 'Enter'].includes(e.key)) return;
@@ -608,6 +641,6 @@ export default function App() {
     {dialog === 'outline' && <Modal className="outline-dialog" title="文稿大纲" onClose={() => setDialog(null)}>{outline}</Modal>}
     {(dialog === 'settings' || dialog === 'about' || dialog === 'versions') && <Modal title={dialog === 'settings' ? '设置' : dialog === 'about' ? '关于笺墨' : '版本说明'} onClose={() => setDialog(null)}><AppSettings page={dialog} onPage={setDialog} state={state} setState={setState} location={notebook.trail[0]?.path} locationError={notebook.error} busy={busy} onChooseLocation={() => openDirectory()} onDefaultLocation={() => openDirectory(true)} /></Modal>}
     {dialog === 'new' && <Modal title="开始一篇新文稿" onClose={() => setDialog(null)}><form onSubmit={e => { e.preventDefault(); { const content = template === 'meeting' ? '# 会议记录\n\n## 议题\n\n## 讨论与决定\n\n## 待办事项\n\n- [ ] \n' : template === 'plan' ? '# 本周计划\n\n## 本周重点\n\n- [ ] \n\n## 每日记录\n' : '# 新的篇章\n\n'; const doc = { ...newDocument(formName || '未命名.md', content), noteDirectory: directoryNames }; setQuery(''); setStarredOnly(false); add(doc); setView('read'); saveFile(false, doc); } }}><label htmlFor="doc-name">文档名称</label><input id="doc-name" autoFocus value={formName} placeholder="未命名.md" maxLength={100} onChange={e => setFormName(e.target.value)} />{dialog === 'new' && <><label htmlFor="template">起始模板</label><select id="template" value={template} onChange={e => setTemplate(e.target.value)}><option value="blank">空白文稿</option><option value="meeting">会议记录</option><option value="plan">每周计划</option></select></>}<div className="dialog-actions"><button type="button" onClick={() => setDialog(null)}>取消</button><button className="primary" type="submit" disabled={busy}>创建文档</button></div></form></Modal>}
-    {dialog === 'export' && <Modal title="保存与导出" onClose={() => setDialog(null)}><div className="export-options"><button disabled={busy} onClick={() => { setDialog(null); saveFile(true); }}><Icon name="file" /><span>另存为 Markdown<small>保留 Markdown 源码</small></span></button><button onClick={() => { const safeTitle = current.name.replace(/[&<>"']/g, ''); const html = renderMarkdown(current.content).html; download(`<!doctype html><html lang="zh-CN" data-theme="${state.theme}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${safeTitle}</title><style>${tokenCss}\n${articleCss}\nbody{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-ui)}article{max-width:736px;margin:auto;padding:48px 24px}</style></head><body><article class="markdown-body">${html}</article></body></html>`, current.name.replace(/\.[^.]+$/, '') + '.html', 'text/html;charset=utf-8'); setNotice('已发起 HTML 下载'); setDialog(null); }}><Icon name="export" /><span>导出 HTML<small>包含排版样式，可在浏览器阅读</small></span></button><button onClick={() => { setDialog(null); setView('read'); setTimeout(() => window.print(), 100); }}><Icon name="file" /><span>打印 / 保存 PDF<small>使用系统打印对话框</small></span></button></div></Modal>}
+    {dialog === 'export' && <Modal title="保存与导出" onClose={() => setDialog(null)}><div className="export-options"><button disabled={busy} onClick={() => { setDialog(null); saveFile(true); }}><Icon name="file" /><span>另存为 Markdown<small>保留 Markdown 源码</small></span></button><button onClick={exportHtml}><Icon name="export" /><span>导出 HTML<small>包含排版样式，可在浏览器阅读</small></span></button><button onClick={printDocument}><Icon name="file" /><span>打印 / 保存 PDF<small>使用系统打印对话框</small></span></button></div></Modal>}
   </div>;
 }

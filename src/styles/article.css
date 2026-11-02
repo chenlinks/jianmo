@@ -15,6 +15,12 @@
 .markdown-body pre { background: var(--code); padding: 20px; border: 1px solid var(--line); border-radius: var(--radius-panel); overflow-x: auto; }
 .markdown-body code { font-family: var(--font-mono); font-size: var(--type-code-size); line-height: var(--type-code-line); background: var(--code); padding: 2px 5px; border-radius: var(--radius-small); }
 .markdown-body pre code { padding: 0; }
+.markdown-body .mermaid-node { margin: 24px 0; padding: 16px; overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius-panel); background: #fff; color: #222; text-align: center; cursor: default; }
+.markdown-body .mermaid-node > svg { display: block; margin: auto; max-width: 100%; height: auto; }
+.markdown-body .mermaid-node pre { text-align: left; color: var(--text); }
+.markdown-body .mermaid-error { color: var(--danger); font-size: var(--type-caption-size); }
+.live-editor .mermaid-node:hover { outline: 1px solid var(--accent); }
+.mermaid-render-workspace { position: fixed; left: -100000px; top: 0; width: 1200px; pointer-events: none; }
 .markdown-body table { border-collapse: collapse; display: block; max-width: 100%; overflow-x: auto; margin: 24px 0; font-size: var(--type-table-size); line-height: var(--type-table-line); }
 .markdown-body th, .markdown-body td { padding: var(--table-padding-y) var(--table-padding-x); border: 0; border-bottom: 1px solid var(--line); text-align: left; height: var(--table-row-height); vertical-align: middle; }
 .markdown-body table[data-table-style=grid] th, .markdown-body table[data-table-style=grid] td { border: 1px solid var(--line); }

@@ -2,6 +2,10 @@ import TurndownService from 'turndown';
 import { imageDimension, mediaMarkdown } from './media.ts';
 import { blockAlignment, tableStyle } from './alignment.ts';
 const converter = new TurndownService({ headingStyle: 'atx', bulletListMarker: '-', codeBlockStyle: 'fenced', emDelimiter: '*', preformattedCode: true });
+converter.addRule('mermaid', {
+  filter: node => node.classList.contains('mermaid-node') && node.hasAttribute('data-mermaid'),
+  replacement: (_text, node) => mediaMarkdown({ kind: 'codeblock', language: 'mermaid', value: node.getAttribute('data-mermaid') ?? '' })
+});
 converter.addRule('sizedImage', {
   filter: node => node.nodeName === 'IMG' && !!(node.getAttribute('data-image-source') || blockAlignment(node.getAttribute('data-block-align')) || imageDimension(node.getAttribute('width')) || imageDimension(node.getAttribute('height'))),
   replacement: (_text, node) => {

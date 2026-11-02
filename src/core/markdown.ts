@@ -27,6 +27,18 @@ export function renderMarkdown(source: string, imageContext = ''): { html: strin
     FORBID_ATTR: ['style', 'srcset'], ALLOW_DATA_ATTR: false, ADD_ATTR: ['data-math', 'data-display', 'data-block-align', 'data-table-style', 'data-managed-image']
   });
   const template = document.createElement('template'); template.innerHTML = html;
+  template.content.querySelectorAll('pre > code').forEach(code => {
+    const language = /(?:^|\s)language-([^\s]+)/.exec(code.className)?.[1]?.toLowerCase();
+    const source = (code.textContent ?? '').replace(/\n$/, '');
+    // Recognize unlabeled flowcharts too, as commonly pasted from chat replies.
+    if (language !== 'mermaid' && (language || !/^\s*(?:flowchart|graph)\s+(?:TB|TD|BT|RL|LR)\b/.test(source))) return;
+    const diagram = document.createElement('div');
+    diagram.className = 'mermaid-node'; diagram.dataset.mermaid = source;
+    diagram.setAttribute('contenteditable', 'false'); diagram.title = '双击编辑 Mermaid 图表';
+    const fallback = document.createElement('pre'); const literal = document.createElement('code');
+    literal.textContent = source; fallback.append(literal); diagram.append(fallback);
+    code.parentElement!.replaceWith(diagram);
+  });
   template.content.querySelectorAll('div[align],div[data-table-style]').forEach(wrapper => {
     const alignment = blockAlignment(wrapper.getAttribute('align'));
     const style = tableStyle(wrapper.getAttribute('data-table-style'));
