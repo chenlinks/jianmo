@@ -5,6 +5,7 @@ import { mediaMarkdown } from '../core/media.ts';
 import type { MediaDraft } from '../core/media.ts';
 import { renderMarkdown } from '../core/markdown.ts';
 import { renderDiagrams } from '../core/mermaid.ts';
+import { formatYaml } from '../core/yaml.ts';
 
 export default function InsertMedia({ initial, imageContext, onImage, onClose, onInsert }: { initial: MediaDraft; imageContext: string; onImage(file: File): Promise<string>; onClose(): void; onInsert(markdown: string): string | undefined }) {
   const [draft, setDraft] = useState(initial);
@@ -13,6 +14,16 @@ export default function InsertMedia({ initial, imageContext, onImage, onClose, o
   const size = natural?.source === draft.value ? natural : null;
   const proportionalHeight = size ? Math.round(size.height * (draft.width ?? size.width) / size.width) : undefined;
   const [error, setError] = useState(''); const [loading, setLoading] = useState(false);
+  const isYaml = draft.kind === 'codeblock' && /^(yaml|yml)$/i.test(draft.language?.trim() ?? '');
+  async function formatCode() {
+    setError(''); setLoading(true);
+    try {
+      const value = await formatYaml(draft.value);
+      setDraft(current => ({ ...current, value }));
+    } catch (error) {
+      setError(`YAML 格式化失败：${error instanceof Error ? error.message : '请检查 YAML 语法'}`);
+    } finally { setLoading(false); }
+  }
   const preview = useMemo(() => { try { return renderMarkdown(mediaMarkdown(draft), imageContext).html; } catch { return ''; } }, [draft, imageContext]);
   const previewRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (previewRef.current) void renderDiagrams(previewRef.current); }, [preview]);
@@ -39,8 +50,9 @@ export default function InsertMedia({ initial, imageContext, onImage, onClose, o
       <div className="image-size-presets">{[25, 50, 75].map(percent => <button type="button" key={percent} disabled={!size} onClick={() => { setLocked(true); setDraft({ ...draft, width: Math.max(1, Math.round(size!.width * percent / 100)), height: undefined }); }}>{percent}%</button>)}<button type="button" onClick={() => { setLocked(true); setDraft({ ...draft, width: undefined, height: undefined }); }}>原始尺寸</button></div>
       <p className="hint">{size ? `原图 ${size.width} × ${size.height} px。` : ''}默认等比缩放，显示宽度不超过页面；取消勾选可分别设置宽高。</p></fieldset>
     </> : <>
-      {draft.kind === 'formula' ? <label className="settings-row" htmlFor="formula-display"><span>显示方式</span><select id="formula-display" value={draft.display ? 'block' : 'inline'} onChange={e => setDraft({ ...draft, display: e.target.value === 'block' })}><option value="block">独立公式</option><option value="inline">行内公式</option></select></label> : <><label htmlFor="code-language">代码语言</label><input id="code-language" list="code-languages" placeholder="例如 javascript、python、java" value={draft.language ?? ''} onChange={e => setDraft({ ...draft, language: e.target.value })} /><datalist id="code-languages">{['javascript', 'typescript', 'python', 'java', 'sql', 'json', 'html', 'css', 'bash', 'rust', 'mermaid', 'text'].map(language => <option key={language} value={language} />)}</datalist></>}
-      <label htmlFor="media-source">{draft.kind === 'formula' ? 'LaTeX 公式' : '代码内容'}</label><textarea id="media-source" autoFocus spellCheck={false} rows={draft.kind === 'formula' ? 4 : 8} value={draft.value} onChange={e => setDraft({ ...draft, value: e.target.value })} />
+      {draft.kind === 'formula' ? <label className="settings-row" htmlFor="formula-display"><span>显示方式</span><select id="formula-display" value={draft.display ? 'block' : 'inline'} onChange={e => setDraft({ ...draft, display: e.target.value === 'block' })}><option value="block">独立公式</option><option value="inline">行内公式</option></select></label> : <><label htmlFor="code-language">代码语言</label><input id="code-language" list="code-languages" placeholder="例如 javascript、python、yaml" disabled={loading} value={draft.language ?? ''} onChange={e => { setError(''); setDraft({ ...draft, language: e.target.value }); }} /><datalist id="code-languages">{['javascript', 'typescript', 'python', 'java', 'sql', 'json', 'yaml', 'yml', 'html', 'css', 'bash', 'rust', 'mermaid', 'text'].map(language => <option key={language} value={language} />)}</datalist></>}
+      <label htmlFor="media-source">{draft.kind === 'formula' ? 'LaTeX 公式' : '代码内容'}</label><textarea id="media-source" autoFocus spellCheck={false} disabled={loading} rows={draft.kind === 'formula' ? 4 : 8} value={draft.value} onChange={e => { setError(''); setDraft({ ...draft, value: e.target.value }); }} />
+      {isYaml && <div><button type="button" disabled={loading || !draft.value.trim()} onClick={() => void formatCode()}>{loading ? '格式化中…' : '格式化 YAML'}</button><p className="hint">使用 2 个空格缩进，保留注释；格式化后可在下方预览并插入。</p></div>}
     </>}
     {draft.kind === 'table' ? <div className="media-preview markdown-body table-insert-preview" aria-label="表格预览"><table style={{ minWidth: `${(draft.columns ?? 3) * 104}px` }}><thead><tr>{Array.from({ length: draft.columns ?? 3 }, (_, index) => <th key={index}><input className="table-header-input" aria-label={`第 ${index + 1} 列表头`} value={draft.headers?.[index] ?? `列 ${index + 1}`} onFocus={event => event.currentTarget.select()} onChange={event => { const value = event.target.value; setDraft(draft => { const headers = Array.from({ length: Math.max(draft.headers?.length ?? 0, draft.columns ?? 3) }, (_, i) => draft.headers?.[i] ?? `列 ${i + 1}`); headers[index] = value; return { ...draft, headers }; }); }} /></th>)}</tr></thead><tbody>{Array.from({ length: draft.rows ?? 3 }, (_, row) => <tr key={row}>{Array.from({ length: draft.columns ?? 3 }, (_, column) => <td key={column}>&nbsp;</td>)}</tr>)}</tbody></table></div> : preview && <div ref={previewRef} className="media-preview markdown-body" aria-label={`${name}预览`} onLoadCapture={e => { const target = e.target as HTMLImageElement; if (draft.kind === 'image' && target.tagName === 'IMG' && target.naturalWidth) setNatural({ source: draft.value, width: target.naturalWidth, height: target.naturalHeight }); }} dangerouslySetInnerHTML={{ __html: preview }} />}
     {error && <p role="alert" className="status-error">{error}</p>}

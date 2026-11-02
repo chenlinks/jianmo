@@ -121,6 +121,24 @@ test('actual React UI: editing, menus, directory creation and persistent library
     const code = win.document.querySelector('#media-source')!;
     await act(async () => { Object.getOwnPropertyDescriptor(win.HTMLTextAreaElement.prototype, 'value')!.set!.call(code, 'const x = "<safe>";'); code.dispatchEvent(new win.Event('input', { bubbles: true })); });
     await click('插入内容'); assert.match(state().documents[0].content, /```\nconst x = "<safe>";\n```/);
+    await click('格式'); await click('插入代码块');
+    const yamlSource = win.document.querySelector('#media-source') as HTMLTextAreaElement;
+    const yamlLanguage = win.document.querySelector('#code-language') as HTMLInputElement;
+    const changeYaml = async (value: string) => act(async () => { Object.getOwnPropertyDescriptor(win.HTMLTextAreaElement.prototype, 'value')!.set!.call(yamlSource, value); yamlSource.dispatchEvent(new win.Event('input', { bubbles: true })); });
+    const changeLanguage = async (value: string) => act(async () => { Object.getOwnPropertyDescriptor(win.HTMLInputElement.prototype, 'value')!.set!.call(yamlLanguage, value); yamlLanguage.dispatchEvent(new win.Event('input', { bubbles: true })); });
+    assert.equal(button('格式化 YAML'), undefined);
+    await changeLanguage('YAML'); assert.equal(button('格式化 YAML').disabled, true);
+    await changeYaml('items: [one, two'); await click('格式化 YAML');
+    // Await the lazy formatter import and the asynchronous formatting result.
+    const settleYaml = async () => { for (let i = 0; i < 100 && yamlSource.disabled; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); }); assert.equal(yamlSource.disabled, false); };
+    await settleYaml();
+    assert.match(win.document.querySelector('[role="alert"]')!.textContent!, /YAML 格式化失败.*\(1:\d+\)/s);
+    assert.equal(yamlSource.value, 'items: [one, two', 'invalid YAML is preserved');
+    await changeYaml('# 配置\napp:\n    name: 笺墨'); assert.equal(win.document.querySelector('[role="alert"]'), null);
+    await changeLanguage('yml'); await click('格式化 YAML'); await settleYaml();
+    assert.equal(yamlSource.value, '# 配置\napp:\n  name: 笺墨\n');
+    assert.equal(win.document.querySelector('.media-preview code')?.textContent, yamlSource.value);
+    await click('插入内容'); assert.match(state().documents[0].content, /```yml\n# 配置\napp:\n  name: 笺墨\n```/);
     await click('段落'); await click('插入表格');
     await click('增加数据行数'); await click('增加列数');
     assert.equal(win.document.querySelectorAll('.media-preview tr').length, 5);
